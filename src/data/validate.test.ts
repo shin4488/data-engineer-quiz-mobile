@@ -43,6 +43,12 @@ describe('parseQuestionFile', () => {
     expect(errorsOf(patch)).not.toEqual([]);
   });
 
+  it('ファイル名の記号を正規表現として扱わず、そのままの文字として id と比べる', () => {
+    const withDot = (id: string) => parseQuestionFile('a.b', [{ ...valid, id }]).errors;
+    expect(withDot('a.b-001')).toEqual([]);
+    expect(withDot('axb-001')).not.toEqual([]);
+  });
+
   it('複数選択では、正解を2つ以上にし、不正解を2つ以上残す', () => {
     const five = { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' };
     const notes = { a: '1', b: '2', c: '3', d: '4', e: '5' };

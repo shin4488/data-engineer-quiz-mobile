@@ -37,7 +37,10 @@ export function parseQuestionFile(fileBase: string, data: unknown): FileResult {
   if (!Array.isArray(data)) {
     return { questions, errors: [`${fileBase}: ファイルの最上位は配列にする`] };
   }
-  const idPattern = new RegExp(`^${fileBase}-\\d{3}$`);
+  // ファイル名を正規表現に組み込むと、記号が特殊文字として解釈されるため、文字列として比べる
+  const idPrefix = `${fileBase}-`;
+  const isValidId = (id: string) =>
+    id.startsWith(idPrefix) && /^\d{3}$/.test(id.slice(idPrefix.length));
 
   data.forEach((raw, index) => {
     const where = `${fileBase}[${index}]`;
@@ -53,7 +56,7 @@ export function parseQuestionFile(fileBase: string, data: unknown): FileResult {
     for (const key of Object.keys(raw)) {
       if (!QUESTION_KEYS.has(key)) fail(`未知のキー "${key}"`);
     }
-    if (typeof raw.id !== 'string' || !idPattern.test(raw.id)) {
+    if (typeof raw.id !== 'string' || !isValidId(raw.id)) {
       fail(`id は "${fileBase}-001" の形式にする`);
     }
     if (typeof raw.domain !== 'string' || !DOMAIN_IDS.includes(raw.domain)) {
