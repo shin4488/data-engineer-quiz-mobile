@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>PDE 対策問題集</title>
+  <rect width="512" height="512" rx="112" fill="#3451c6"/>
+  <g fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round">
+    <ellipse cx="236" cy="150" rx="122" ry="42"/>
+    <path d="M114 150v186c0 23 55 42 122 42"/>
+    <path d="M358 150v84"/>
+    <path d="M114 243c0 23 55 42 122 42 30 0 58-4 79-10"/>
+  </g>
+  <circle cx="362" cy="358" r="88" fill="#fff"/>
+  <path d="M318 360l31 31 58-62" fill="none" stroke="#3451c6" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

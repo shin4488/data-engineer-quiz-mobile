@@ -1,0 +1,44 @@
+# 依存関係・ビルド成果物
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# 環境変数・認証情報・署名鍵（ストア公開用を含む）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.keystore
+*.jks
+service-account*.json
+credentials*.json
+google-services.json
+GoogleService-Info.plist
+
+# ログ
+*.log
+npm-debug.log*
+
+# テスト・スクリーンショットの出力
+test-results/
+playwright-report/
+screenshots/
+
+# エディタ・OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Claude Code の個人設定
+.claude/settings.local.json

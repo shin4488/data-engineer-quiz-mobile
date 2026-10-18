@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest';
+import { EMPTY_FILTER } from './filter.ts';
+import type { SessionSummary } from './session.ts';
+import {
+  type AppData,
+  addHistory,
+  DEFAULT_DATA,
+  exportData,
+  importData,
+  loadData,
+  saveData,
+} from './storage.ts';
+
+class MemoryStorage implements Storage {
+  private map = new Map<string, string>();
+  get length() {
+    return this.map.size;
+  }
+  clear() {
+    this.map.clear();
+  }
+  getItem(key: string) {
+    return this.map.get(key) ?? null;
+  }
+  key(i: number) {
+    return [...this.map.keys()][i] ?? null;
+  }
+  removeItem(key: string) {
+    this.map.delete(key);
+  }
+  setItem(key: string, value: string) {
+    this.map.set(key, value);
+  }
+}
+
+const sample: AppData = {
+  progress: {
+    stats: {
+      'design-security-001': { correct: 2, wrong: 3, lastResult: 'wrong', lastAnsweredAt: 5 },
+    },
+    marked: ['store-selection-002'],
+  },
+  session: null,
+  history: [{ mode: 'exam', startedAt: 1, finishedAt: 2, total: 50, correct: 36 }],
+  prefs: { filter: { ...EMPTY_FILTER, domains: ['store'], minWrong: 2 }, count: 20 },
+};
+
+describe('loadData / saveData', () => {
+  it('保存したデータを、次回の起動時に同じ内容で読み込む', () => {
+    const storage = new MemoryStorage();
+    expect(saveData(sample, storage)).toBe(true);
+    expect(loadData(storage)).toEqual(sample);
+  });
+
+  it('保存データがない・壊れている場合は、初期状態で起動する', () => {
+    const storage = new MemoryStorage();
+    expect(loadData(storage)).toEqual(DEFAULT_DATA);
+    storage.setItem('pde-quiz:v1', '{壊れたJSON');
+    expect(loadData(storage)).toEqual(DEFAULT_DATA);
+  });
+
+  it('保存領域が使えない場合も、例外を出さずに初期状態で起動する', () => {
+    const broken = new MemoryStorage();
+    broken.getItem = () => {
+      throw new Error('denied');
+    };
+    broken.setItem = () => {
+      throw new Error('quota');
+    };
+    expect(loadData(broken)).toEqual(DEFAULT_DATA);
+    expect(saveData(sample, broken)).toBe(false);
+  });
+});
+
+describe('exportData / importData', () => {
+  it('書き出したデータを読み込むと、元のデータに戻る', () => {
+    const result = importData(exportData(sample, 0));
+    expect(result).toEqual({ ok: true, data: sample });
+  });
+
+  it('JSON でないデータは読み込まない', () => {
+    expect(importData('hello')).toMatchObject({ ok: false });
+  });
+
+  it('このアプリ以外で作られたデータは読み込まない', () => {
+    expect(importData(JSON.stringify({ ...sample, app: 'other', version: 1 }))).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('成績の値が不正なデータは読み込まない', () => {
+    const bad = JSON.parse(exportData(sample, 0));
+    bad.progress.stats['design-security-001'].wrong = -1;
+    expect(importData(JSON.stringify(bad))).toMatchObject({ ok: false });
+  });
+});
+
+describe('addHistory', () => {
+  it('新しい結果を先頭に追加し、最大30件まで残す', () => {
+    const item = (n: number): SessionSummary => ({
+      mode: 'practice',
+      startedAt: n,
+      finishedAt: n,
+      total: 10,
+      correct: 5,
+    });
+    let history: SessionSummary[] = [];
+    for (let i = 1; i <= 31; i++) history = addHistory(history, item(i));
+    expect(history).toHaveLength(30);
+    expect(history[0]?.finishedAt).toBe(31);
+    expect(history.at(-1)?.finishedAt).toBe(2);
+  });
+});
