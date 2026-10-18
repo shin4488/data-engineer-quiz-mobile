@@ -66,7 +66,7 @@ export default defineConfig({
     }),
   ],
   build: {
-    // Mermaid は図を表示するときだけ読み込むため、大きなチャンクの警告は対象外にする
+    // 問題データを含む本体と、図を表示するときだけ読み込む Mermaid のチャンクは大きくなるため、警告の上限を上げる
     chunkSizeWarningLimit: 2000,
   },
   test: {

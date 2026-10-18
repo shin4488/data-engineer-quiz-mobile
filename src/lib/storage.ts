@@ -106,7 +106,7 @@ function parseData(v: unknown): AppData | null {
   };
 }
 
-/** 保存領域が使えない環境（プライベートブラウズなど）でも、初期状態で起動できるようにする。 */
+/** 保存領域が使えない環境（ブラウザの設定でサイトのデータの保存を禁止している場合など）でも、初期状態で起動できるようにする。 */
 export function loadData(storage: Storage | undefined = globalThis.localStorage): AppData {
   try {
     const raw = storage?.getItem(STORAGE_KEY);

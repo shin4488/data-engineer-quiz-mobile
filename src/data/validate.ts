@@ -128,7 +128,7 @@ export function parseQuestionFile(fileBase: string, data: unknown): FileResult {
       for (const ref of refs) {
         if (!isRecord(ref) || !isText(ref.title) || !isText(ref.url)) {
           fail('references の各要素に title と url を書く');
-        } else if (!/^https:\/\/(docs\.)?cloud\.google\.com\/[^\s]*$/.test(ref.url)) {
+        } else if (!/^https:\/\/docs\.cloud\.google\.com\/[^\s]*$/.test(ref.url)) {
           fail(`公式ドキュメント以外の URL "${ref.url}"`);
         }
       }

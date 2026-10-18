@@ -33,6 +33,10 @@ describe('parseQuestionFile', () => {
     ['理由が欠けた選択肢', { choiceNotes: { a: '理由A', b: '理由B', c: '理由C' } }],
     ['選択肢が3つ', { choices: { a: 'A', b: 'B', c: 'C' } }],
     ['公式ドキュメント以外の URL', { references: [{ title: 'x', url: 'https://example.com/' }] }],
+    [
+      'docs.cloud.google.com 以外の Google Cloud の URL',
+      { references: [{ title: 'x', url: 'https://cloud.google.com/bigquery/docs' }] },
+    ],
     ['Mermaid でない図', { diagram: 'graph LR; A-->B' }],
     ['未知の項目', { hint: 'ヒント' }],
   ])('%s をエラーにする', (_label, patch) => {

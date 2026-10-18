@@ -88,7 +88,7 @@ export function DataScreen({ data, saveFailed, onReplace }: Props) {
       )}
       {saveFailed && (
         <p className="notice notice-error" role="alert">
-          この端末に保存できませんでした。プライベートブラウズでは保存できません。
+          この端末に保存できませんでした。ブラウザの設定でサイトのデータの保存が禁止されていないか、端末の空き容量が足りているかを確認してください。
         </p>
       )}
 

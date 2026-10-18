@@ -1,10 +1,10 @@
-// 試験ガイドの5分野。名称は公式の日本語版試験ガイドに合わせる。
+// 試験ガイドの5分野。名称は Google Cloud の認定資格ページ（日本語）の表記に合わせる。
 export const DOMAINS = [
   { id: 'design', label: 'データ処理システムの設計', short: '設計' },
   { id: 'ingest', label: 'データの取り込みと処理', short: '取り込み・処理' },
   { id: 'store', label: 'データの保存', short: '保存' },
-  { id: 'analyze', label: '分析用データの準備と使用', short: '分析' },
-  { id: 'maintain', label: 'データワークロードの保守と自動化', short: '保守・自動化' },
+  { id: 'analyze', label: '分析用データを準備して使用する', short: '分析' },
+  { id: 'maintain', label: 'データ ワークロードの維持と自動化', short: '維持・自動化' },
 ] as const;
 
 export type DomainId = (typeof DOMAINS)[number]['id'];
@@ -16,7 +16,6 @@ export const SERVICES = [
   { id: 'pubsub', label: 'Pub/Sub' },
   { id: 'dataproc', label: 'Dataproc' },
   { id: 'data-fusion', label: 'Cloud Data Fusion' },
-  { id: 'dataprep', label: 'Dataprep' },
   { id: 'kafka', label: 'Apache Kafka' },
   { id: 'datastream', label: 'Datastream' },
   { id: 'composer', label: 'Cloud Composer' },
