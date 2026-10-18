@@ -546,43 +546,40 @@
   services: [dataproc, bigquery, cloud-storage]
   type: single
   question: |
-    あるオンライン学習サービスでは、2名のデータエンジニアが、1日に数回 PySpark のジョブを実行しています。ジョブは BigQuery にある学習履歴のテーブル（数 TB）を読み、特徴量を計算して BigQuery に書き戻します。現在は、BigQuery のテーブルを CSV で Cloud Storage にエクスポートしてから、Dataproc のクラスタで処理しています。エクスポートに時間がかかるうえ、クラスタのサイズ調整や保守も負担になっています。
+    あるオンライン学習サービスでは、データ サイエンス チームが Serverless for Apache Spark の PySpark のバッチ ワークロードで、BigQuery にある学習履歴のテーブル（約 30 TB、約 150 列）から、退会を予測するモデルの特徴量を作っています。特徴量の計算に使うのは、約 10 列と直近 90 日分の行だけです。
 
-    既存の PySpark のコードをできるだけ使い続けながら、クラスタの管理をなくし、中間ファイルを介さずに BigQuery を読み書きしたいと考えています。
+    現在は、ワークロードの前にテーブル全体を CSV で Cloud Storage にエクスポートしてから PySpark で読み込み、計算した特徴量も CSV で Cloud Storage に出力してから、読み込みジョブで BigQuery に取り込んでいます。エクスポートと取り込みに時間がかかり、中間ファイルの保存にも費用がかかっています。
 
-    どうすればよいですか？
+    既存の PySpark の DataFrame の処理はそのまま使い、中間ファイルを介さずに、必要な列と行だけを BigQuery から読み込みたいと考えています。どうすればよいですか？
   choices:
-    a: "Serverless for Apache Spark のバッチ ワークロードとして実行し、Spark 用 BigQuery コネクタでテーブルを直接読み書きする"
-    b: "Serverless for Apache Spark のバッチ ワークロードとして実行し、引き続きエクスポートした CSV を Cloud Storage から読み込む"
-    c: "Dataproc のクラスタを常時稼働させ、Spark 用 BigQuery コネクタでテーブルを直接読み書きする"
-    d: "PySpark の処理を BigQuery の SQL で書き直し、スケジュールされたクエリとして実行する"
+    a: "Spark 用 BigQuery コネクタでテーブルを DataFrame として読み込み、列と行の絞り込みを BigQuery 側で行わせ、特徴量も直接書き込む"
+    b: "EXPORT DATA 文で必要な列と直近 90 日分の行だけを Parquet 形式で Cloud Storage に書き出し、PySpark でそのファイルを読み込む"
+    c: "BigQuery の JDBC ドライバを使い、Spark の JDBC データソースでテーブルを読み込んで、特徴量も JDBC で書き込む"
+    d: "特徴量の計算を BigQuery DataFrames で書き直し、BigQuery の中で計算した結果をテーブルに保存する"
   answer: [a]
   choiceNotes:
-    a: "正解です。Serverless for Apache Spark では、クラスタを作成・管理せずに Spark のジョブを実行でき、リソースも自動で調整されます。BigQuery コネクタは Storage Read API でテーブルを直接読むため、エクスポートは不要です。"
-    b: "クラスタの管理はなくなりますが、エクスポートによる中間ファイルと待ち時間が残ります。中間ファイルを介さずに読み書きしたいという要件に反します。"
-    c: "エクスポートは不要になりますが、クラスタの管理が残ります。常時稼働させると、ジョブを実行していない時間のコストもかかります。"
-    d: "既存の PySpark のコードを使えず、処理を全面的に書き直す必要があります。"
+    a: "正解です。Spark 用 BigQuery コネクタは Storage Read API でテーブルを並列に読み込み、DataFrame で選んだ列や行の条件を BigQuery 側で適用するため、必要なデータだけが転送されます。直接の書き込み方式では、Storage Write API で中間ファイルを介さずに書き込めます。"
+    b: "読み込む量は減りますが、Cloud Storage の中間ファイルを介する点は変わらず、要件に反します。特徴量の書き戻しの方法も変わりません。"
+    c: "JDBC での読み取りはクエリとして実行され、書き込みも INSERT 文になるため、数十 TB のデータを並列に読み書きする用途には向きません。"
+    d: "既存の PySpark の処理を使えず、計算処理を書き直す必要があります。"
   explanation: |
-    **Serverless for Apache Spark**（旧称 Dataproc Serverless）は、クラスタを作成・管理せずに Spark のワークロードを実行できるサービスです。
+    Spark から BigQuery のデータを読み書きするときは、**Spark 用 BigQuery コネクタ** を使います。Dataproc のクラスタでも Serverless for Apache Spark でも使えます。
 
-    - PySpark などのジョブをバッチ ワークロードとして送信するだけで実行できる
-    - 必要なリソースは自動で割り当てられ、ジョブが終われば解放される
-    - クラスタのサイズ調整や保守が不要
+    | 処理 | 仕組み | ポイント |
+    | --- | --- | --- |
+    | 読み取り | Storage Read API で、複数のストリームから並列に読む | DataFrame で選んだ列や行の条件が BigQuery 側で適用され、必要な列と行だけが転送される |
+    | 書き込み（direct） | Storage Write API で直接書き込む | Cloud Storage の一時ファイルが不要 |
+    | 書き込み（indirect） | いったん Cloud Storage に書き出し、読み込みジョブで取り込む | 一時的に使うバケットの指定が必要 |
 
-    **Spark 用 BigQuery コネクタ** を使うと、Spark から BigQuery のテーブルを直接読み書きできます。
-
-    | 処理 | 仕組み |
-    | --- | --- |
-    | 読み取り | Storage Read API で並列に読む。列の選択や行のフィルタは BigQuery 側で適用される |
-    | 書き込み（direct） | Storage Write API で直接書き込む |
-    | 書き込み（indirect） | いったん Cloud Storage に書き出し、BigQuery の読み込みジョブで取り込む |
+    - テーブルではなくビューやクエリの結果を読み込む場合は、BigQuery でクエリが実行され、その結果を一時的なテーブルに書き出してから読み込みます。
+    - Cloud Storage を経由するエクスポートは、エクスポートの完了を待つ時間と中間ファイルの管理が必要になります。BigQuery のデータを Spark で処理するなら、まずコネクタでの直接の読み書きを検討します。
 
     なお、最近のドキュメントでは、Dataproc のクラスタと Serverless for Apache Spark が Managed Service for Apache Spark という名称にまとめられ、それぞれクラスタとサーバーレスのデプロイとして扱われています。試験ガイドでは Dataproc の名称が使われています。
   references:
-    - title: "Managed Service for Apache Spark のサーバーレスの概要"
-      url: "https://docs.cloud.google.com/managed-spark/docs/serverless-overview"
     - title: "Spark BigQuery コネクタを使用する"
       url: "https://docs.cloud.google.com/managed-spark/docs/tutorials/bigquery-connector-spark-example"
+    - title: "Managed Service for Apache Spark のサーバーレスの概要"
+      url: "https://docs.cloud.google.com/managed-spark/docs/serverless-overview"
 
 - id: ingest-services-015
   domain: ingest
@@ -851,51 +848,54 @@
 
 - id: ingest-services-021
   domain: ingest
-  services: [datastream, bigquery, data-fusion, migration]
+  services: [bigquery, cloud-storage]
   type: single
   question: |
-    ある航空会社は、予約システムのデータベース（Cloud SQL for MySQL）の変更を、分析のために数分以内の遅れで BigQuery に反映したいと考えています。要件は次のとおりです。
+    ある広告代理店は、複数の広告媒体から毎日届く配信実績の Parquet ファイルを Cloud Storage に置き、bq load コマンドの読み込みジョブで BigQuery の配信実績テーブルに追記しています。広告媒体は新しい指標を提供するたびに、ファイルに項目を追加します。追加される項目は、値が入らない行もある任意の項目です。先日、新しい項目を含むファイルの読み込みが、テーブルのスキーマと一致しないというエラーで失敗しました。
 
-    - 本番のデータベースに、定期的な抽出クエリの負荷をかけない
-    - 行の削除も BigQuery に反映する
-    - BigQuery では、ソースと同じ最新の状態のテーブルを参照する
-    - サーバーレスで、インスタンスやクラスタの管理を避ける
+    要件は次のとおりです。
+
+    - 新しい項目は、テーブルの列として自動で取り込む
+    - これまでに読み込んだデータと、それを参照する既存のクエリは、そのまま使い続ける
+    - スキーマを比較・変更するための独自のコードは追加しない
 
     どうすればよいですか？
   choices:
-    a: "Datastream のストリームを作成し、MySQL のバイナリログから変更を読み取って BigQuery に書き込む"
-    b: "Cloud Data Fusion のレプリケーションで、MySQL のバイナリログから変更を読み取って BigQuery に複製する"
-    c: "Database Migration Service で、Cloud SQL から BigQuery への継続的な移行ジョブを作成する"
-    d: "BigQuery の連携クエリを 5 分ごとにスケジュールし、更新日時が新しい行を MERGE 文で反映する"
+    a: "読み込みジョブにスキーマの更新オプション ALLOW_FIELD_ADDITION を指定し、新しい項目を列として追加させる"
+    b: "読み込みジョブを上書き（WRITE_TRUNCATE）に変えて、毎回ファイルのスキーマに合わせてテーブルを作り直す"
+    c: "配信実績を1つの JSON 型の列に読み込むテーブルに切り替え、項目が増えてもスキーマを変更せずに済むようにする"
+    d: "読み込みの前にファイルとテーブルのスキーマを比べ、足りない列を ALTER TABLE 文で追加するスクリプトを毎回実行する"
   answer: [a]
   choiceNotes:
-    a: "正解です。Datastream はサーバーレスの CDC（変更データ キャプチャ）サービスです。バイナリログから変更を読み取るため本番のデータベースへの負荷が小さく、削除も反映できます。BigQuery の宛先では、ソースと同じ状態のテーブルを維持できます。"
-    b: "ログをもとに複製できますが、Cloud Data Fusion のインスタンスが必要で、複製の処理は Dataproc のクラスタ上で実行されます。インスタンスやクラスタの管理を避けたいという要件に反します。"
-    c: "Database Migration Service は、データベースを Cloud SQL や AlloyDB などに移行するサービスです。BigQuery を移行先にはできません。"
-    d: "定期的なクエリが本番のデータベースに負荷をかけます。更新日時による抽出では、削除された行も検出できません。"
+    a: "正解です。追記の読み込みジョブで ALLOW_FIELD_ADDITION を指定すると、ファイルに含まれる新しい項目が NULL を許容する列としてテーブルに追加されます。Parquet はファイルにスキーマを持つため、新しい列の名前と型もファイルから決まります。既存の行の新しい列は NULL になり、既存のクエリはそのまま動きます。"
+    b: "毎回テーブルが上書きされ、これまでに読み込んだデータが失われます。既存のデータを使い続けるという要件に反します。"
+    c: "項目の追加には強くなりますが、既存のデータの移し替えと、列を参照している既存のクエリの書き換えが必要になります。"
+    d: "動作はしますが、スキーマを比較・変更する独自のコードを作成・保守することになり、要件に反します。"
   explanation: |
-    データベースの変更を継続的に BigQuery に取り込むには、**Datastream** を使います。
+    追記の読み込みで、ファイル側で増えた項目をテーブルの列として取り込むには、読み込みジョブの **スキーマの更新オプション** を使います。
 
-    - データベースのログ（MySQL のバイナリログ、Oracle の LogMiner、PostgreSQL の論理デコードなど）から変更を読み取る、サーバーレスの CDC サービス
-    - ストリームの開始時に既存のデータをバックフィルし、その後の変更を継続的に複製する
-    - 宛先は BigQuery または Cloud Storage
-    - ソースへの接続方法は、IP 許可リスト、SSH トンネルによる転送、プライベート接続（VPC ピアリング）などから選ぶ
-
-    | 方法 | 特徴 |
+    | オプション | できること |
     | --- | --- |
-    | Datastream | サーバーレス。BigQuery への CDC に推奨 |
-    | Cloud Data Fusion のレプリケーション | Data Fusion のインスタンスで設定し、Dataproc 上で実行する。Data Fusion のほかのパイプラインと一緒に管理したい場合 |
-    | Database Migration Service | データベースどうしの移行（Cloud SQL、AlloyDB など） |
-  diagram: |
-    flowchart TD
-      S["Cloud SQL for MySQL<br/>予約システム"] -->|バイナリログ| D["Datastream<br/>ストリーム"]
-      D -->|バックフィルと<br/>継続的な変更| B["BigQuery<br/>最新状態のテーブル"]
-      B --> A["分析・ダッシュボード"]
+    | ALLOW_FIELD_ADDITION | 新しい列を NULL 許容（NULLABLE）の列として追加する |
+    | ALLOW_FIELD_RELAXATION | 必須（REQUIRED）の列を NULL 許容に変更する |
+
+    - 使えるのは、追記（WRITE_APPEND）の読み込みジョブやクエリジョブです。上書き（WRITE_TRUNCATE）では、パーティションを指定して書き込む場合に限られます。
+    - 新しい列のスキーマは、Avro、Parquet、ORC ではファイルのスキーマから決まります。CSV や JSON では、スキーマの自動検出か、指定したスキーマのファイルを使います。
+    - 既存のテーブルに、必須（REQUIRED）の列は追加できません。
+    - 列の削除や型の変更は、このオプションではできません。
+
+    ```bash
+    bq load \
+      --source_format=PARQUET \
+      --schema_update_option=ALLOW_FIELD_ADDITION \
+      ads.delivery_results \
+      "gs://media-reports/2026-10-18/*.parquet"
+    ```
   references:
-    - title: "BigQuery の宛先"
-      url: "https://docs.cloud.google.com/datastream/docs/destination-bigquery"
-    - title: "レプリケーションの概要"
-      url: "https://docs.cloud.google.com/data-fusion/docs/concepts/replication"
+    - title: "テーブル スキーマの変更"
+      url: "https://docs.cloud.google.com/bigquery/docs/managing-table-schemas"
+    - title: "読み込みジョブを使用して列を追加する"
+      url: "https://docs.cloud.google.com/bigquery/docs/samples/bigquery-add-column-load-append"
 
 - id: ingest-services-022
   domain: ingest
@@ -1102,7 +1102,7 @@
     - 依存関係、再試行、バックフィル、監視の画面など、Airflow の機能をそのまま使える
     - 新しく作成する環境には Cloud Composer 3 を使う（Cloud Composer 1 は廃止されている）
 
-    なお、最近のドキュメントでは、Cloud Composer は Managed Service for Apache Airflow（Cloud Composer 3 は Managed Airflow (Gen 3)）という名称になっています。試験ガイドでは Cloud Composer の名称が使われています。
+    なお、Cloud Composer は2026年4月に Managed Service for Apache Airflow へ名称が変わりました（Cloud Composer 3 は Managed Airflow (Gen 3)）。試験ガイドでは Cloud Composer の名称が使われています。
 
     | 要件 | 選ぶサービス |
     | --- | --- |

@@ -729,7 +729,7 @@
     | Spark などのオープンソースのエンジン | BigLake metastore で管理する Iceberg テーブル（BigQuery からは読み取る） |
     | BigQuery（DML、ストリーミング） | BigQuery が管理する Iceberg テーブル |
 
-    なお、BigLake は新しい製品名では Lakehouse と表記されることがあり、API も「Lakehouse API（旧 BigLake API）」と表記されています。
+    なお、BigLake は2026年4月に Lakehouse for Apache Iceberg という名称に変わり、BigLake metastore は Lakehouse runtime catalog と呼ばれるようになりました。API、クライアント ライブラリ、IAM の名前には BigLake が残っています。試験ガイドでは BigLake の名称が使われています。
   references:
     - title: "BigLake metastore の Iceberg REST カタログを使用する"
       url: "https://docs.cloud.google.com/biglake/docs/blms-rest-catalog"
@@ -971,44 +971,61 @@
 
 - id: store-warehouse-022
   domain: store
-  services: [dataplex, bigquery, dlp, dataflow]
+  services: [bigquery, cloud-sql, datastream, migration]
   type: multiple
   question: |
-    ある電力会社は、スマートメーターの検針データを毎日 BigQuery のテーブルに追加しており、料金計算のシステムがこのテーブルを使っています。最近、メーター ID が空の行や、ありえない使用量の値が混ざり、料金の計算に誤りが出ました。
+    ある家具チェーンは、受注システムのデータベースに Cloud SQL for PostgreSQL を使い、過去の販売実績や顧客のデータは BigQuery に蓄積しています。商品企画チームは月に数回、受注システムにある最新の注文や配送予定の状況と、BigQuery にある過去の販売実績を組み合わせて分析したいと考えています。
 
-    データ エンジニアのチームは、まず各列の NULL の割合や値の分布を把握してから検証のルールを決め、その後は毎日追加されるデータを自動で検証したいと考えています。検証に失敗したときはチームに通知し、結果は傾向の分析のために BigQuery に蓄積します。自作のコードを最小限に抑えて実現するには、どの対応を組み合わせるべきですか？
+    要件は次のとおりです。
+
+    - 分析には、分析を実行した時点の最新の受注データを使う
+    - 分析の頻度が低いため、受注データを BigQuery に継続的に複製する仕組みを新たに構築・運用することは避ける
+    - 分析は BigQuery の SQL で行う
+
+    どの対応を組み合わせるべきですか？
   choices:
-    a: "Dataplex のデータ プロファイル スキャンをテーブルに実行し、列ごとの NULL の割合、値の範囲、よく出る値を確認する"
-    b: "検証用の SQL をスケジュールされたクエリで毎日実行し、失敗した行の件数を Cloud Run functions でメールに送る"
-    c: "Dataplex のデータ品質スキャンで NULL、範囲、値のセットのルールを定義して定期実行し、結果のエクスポートと通知を設定する"
-    d: "Sensitive Data Protection の検査ジョブをテーブルに定期実行し、不正な値を含む行を検出する"
-    e: "Dataflow のバッチ パイプラインを毎日実行し、各行を検証してから別のテーブルに書き込む"
-  answer: [a, c]
+    a: "BigQuery で、受注システムの Cloud SQL インスタンスに接続するための接続リソースを作成する"
+    b: "EXTERNAL_QUERY 関数で受注システムに SQL を送り、その結果を BigQuery の販売実績のテーブルと結合する"
+    c: "Datastream で受注システムの変更を BigQuery に継続的に複製し、複製したテーブルと販売実績のテーブルを結合する"
+    d: "毎晩、受注システムのテーブルを CSV で Cloud Storage にエクスポートし、BigQuery の外部テーブルとして参照する"
+    e: "Database Migration Service で受注システムのデータベースを BigQuery に移行し、移行したテーブルを分析に使う"
+  answer: [a, b]
   choiceNotes:
-    a: "正解です。データ プロファイル スキャンは、列ごとの NULL の割合、一意の値の割合、値の範囲、上位の値などを自動で集計します。検証ルールを決める材料になります。"
-    b: "動作はしますが、ルールの管理、結果の保存、通知の仕組みを自作することになり、要件に反します。"
-    c: "正解です。データ品質スキャンは、定義したルールでデータを自動で検証し、スケジュール実行、BigQuery への結果のエクスポート、失敗時の通知に対応しています。"
-    d: "Sensitive Data Protection は個人情報などの機密データを検出する機能で、値の範囲や NULL の検証には使えません。"
-    e: "検証のためのパイプラインを開発・運用することになり、自作のコードを最小限にするという要件に反します。"
+    a: "正解です。連携クエリを使うには、Cloud SQL のインスタンス、データベース、ユーザーの情報を登録した接続リソースを BigQuery に作成します。クエリでは、この接続を指定して Cloud SQL にアクセスします。"
+    b: "正解です。EXTERNAL_QUERY は、指定した SQL を Cloud SQL 側で実行し、結果を一時的なテーブルとして BigQuery に返します。データを複製せずに、実行した時点の最新のデータを BigQuery のテーブルと1つのクエリで結合できます。"
+    c: "数分以内の遅れで分析できますが、継続的な複製の仕組みを構築・運用することになり、要件に反します。"
+    d: "前日の夜の時点のデータしか使えず、最新のデータで分析するという要件を満たしません。エクスポートの処理も新たに運用する必要があります。"
+    e: "Database Migration Service の移行先は Cloud SQL や AlloyDB などのデータベースで、BigQuery は移行先にできません。受注システム自体を移行したいわけでもありません。"
   explanation: |
-    Dataplex には、データの状態を把握し、監視するための2種類のスキャンがあります。
+    **連携クエリ（federated query）** を使うと、データを BigQuery に複製せずに、Cloud SQL、AlloyDB、Spanner のデータを BigQuery の SQL から参照できます。
 
-    | スキャン | 目的 | 主な結果 |
-    | --- | --- | --- |
-    | データ プロファイル スキャン | データの特徴を知る | NULL の割合、一意の値の割合、最小・最大値、上位の値など |
-    | データ品質スキャン | ルールに合っているかを検証する | ルールごとの合否、合格した行の割合 |
+    ```sql
+    SELECT h.product_id, h.sales_last_year, o.open_orders
+    FROM furniture.sales_history AS h
+    JOIN EXTERNAL_QUERY(
+      "my-project.asia-northeast1.orders-conn",
+      "SELECT product_id, COUNT(*) AS open_orders FROM orders WHERE status = 'OPEN' GROUP BY product_id"
+    ) AS o
+    ON h.product_id = o.product_id;
+    ```
 
-    データ品質スキャンで使える主なルールは次のとおりです。
+    - 外部のクエリはデータベース側で実行されるため、受注システムに負荷がかかります。重いクエリを実行する場合は、リードレプリカを対象にすることも検討します。
+    - 連携クエリは読み取り専用です。結果は一時的なテーブルとして返され、BigQuery のテーブルと結合できます。
+    - BigQuery のストレージにあるテーブルを読むより、クエリは遅くなりがちです。
 
-    - **行単位**：NULL でない、値の範囲、値のセット、正規表現、行の条件
-    - **集計**：統計値の範囲、テーブルの条件、SQL アサーション（結果の行が返ったら失敗）
-    - このほか、値の一意性を確かめるルールもあります。
-
-    行単位のルールには、合格とみなす行の割合（しきい値）を設定できます。結果は BigQuery のテーブルへのエクスポート、メールでの通知、カタログへの公開ができ、BigQuery のコンソールからも確認できます。
-
-    まずプロファイルでデータの特徴をつかみ、その結果をもとに品質ルールを決めて定期的に検証する、という順序が基本です。
+    | 方法 | データの鮮度 | 運用 | 向いている場面 |
+    | --- | --- | --- | --- |
+    | 連携クエリ | クエリを実行した時点 | 接続リソースの作成と管理 | 頻度の低い分析、少量のデータの参照 |
+    | Datastream による複製 | 数分以内の遅れ | ストリームの運用 | 頻繁な分析、大量のデータの集計 |
+    | 定期的なエクスポート | エクスポートした時点 | エクスポートの処理の運用 | 鮮度を問わない集計 |
+  diagram: |
+    flowchart TD
+      U["商品企画チーム"] -->|BigQuery の SQL| BQ["BigQuery<br/>過去の販売実績"]
+      BQ -->|EXTERNAL_QUERY| C["接続リソース"]
+      C --> DB["Cloud SQL<br/>受注システム"]
+      DB -.->|実行時点の結果| BQ
   references:
-    - title: "データ プロファイリングについて"
-      url: "https://docs.cloud.google.com/dataplex/docs/data-profiling-overview"
-    - title: "自動データ品質を使用する"
-      url: "https://docs.cloud.google.com/dataplex/docs/use-auto-data-quality"
+    - title: "連携クエリの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/federated-queries-intro"
+    - title: "Cloud SQL 連携クエリ"
+      url: "https://docs.cloud.google.com/bigquery/docs/cloud-sql-federated-queries"

@@ -289,7 +289,7 @@
 
     ワークフロー テンプレートは、Cloud Scheduler から HTTP で実行（インスタンス化）できます。複雑な依存関係がなければ、オーケストレーションのための環境は不要です。
 
-    なお、Dataproc（Dataproc on Compute Engine）は、現在は Managed Service for Apache Spark のクラスタ デプロイという名称になっています。
+    なお、最近のドキュメントでは、Dataproc（Dataproc on Compute Engine）は Managed Service for Apache Spark のクラスタ デプロイという名称になっています。試験ガイドでは Dataproc の名称が使われています。
   diagram: |
     flowchart TD
       S["Cloud Scheduler<br/>毎晩"] -->|インスタンス化| W["ワークフロー テンプレート"]
@@ -336,7 +336,7 @@
     - Spark の動的リソース割り当てによって、エグゼキュータの数が自動でスケーリングされる
     - アイドル時の費用や、クラスタの起動・停止にかかる費用がない
 
-    VM に SSH で接続したい、細かいクラスタ設定が必要などの場合は、クラスタでの実行を選びます。なお、Serverless for Apache Spark（旧称 Dataproc Serverless）は、現在は Managed Service for Apache Spark のサーバーレス デプロイという名称になっています。
+    VM に SSH で接続したい、細かいクラスタ設定が必要などの場合は、クラスタでの実行を選びます。なお、最近のドキュメントでは、Serverless for Apache Spark（旧称 Dataproc Serverless）は Managed Service for Apache Spark のサーバーレス デプロイという名称になっています。
   references:
     - title: "Managed Service for Apache Spark のサーバーレスの概要"
       url: "https://docs.cloud.google.com/managed-spark/docs/overview"
@@ -577,7 +577,7 @@
 
     ワーカーの自動スケーリングは、キューで待っているタスクの数と、ワーカーの同時実行数（`celery.worker_concurrency`）をもとに必要なワーカー数を決めます。**最小数はアイドル時の費用、最大数はピーク時の処理能力** を決めると考えると設定しやすくなります。
 
-    なお、Cloud Composer は2026年4月に Managed Service for Apache Airflow へ名称が変わりました。
+    なお、Cloud Composer は2026年4月に Managed Service for Apache Airflow へ名称が変わりました（Cloud Composer 3 は Managed Airflow (Gen 3)）。試験ガイドでは Cloud Composer の名称が使われています。
   references:
     - title: "環境のスケーリングについて"
       url: "https://docs.cloud.google.com/composer/docs/composer-3/environment-scaling"
@@ -687,45 +687,44 @@
 
 - id: maintain-cost-017
   domain: maintain
-  services: [dataform, bigquery, composer]
+  services: [bigtable]
   type: single
   question: |
-    ある食品メーカーは、BigQuery のデータ変換を Dataform で管理しています。Git と連携したリポジトリに約60個の SQLX ファイルがあり、テーブル間の依存関係は ref() で定義しています。現在は、担当者が毎朝、開発用のワークスペースから手動でワークフローを実行しています。
+    ある天気予報アプリの運営企業は、地点ごとの観測値と予報の時系列データを Bigtable のクラスタ（SSD）に保存し、アプリの画面表示に使っています。読み取りは朝の通勤時間帯と夕方に集中し、深夜はほとんどありません。また、台風や大雨のときには、予測できないタイミングで読み取りが普段の数倍に増えます。
 
-    次の要件を満たしたいと考えています。
-    - main ブランチのコードを、毎朝5時に自動で実行する
-    - 実行の順番は、定義済みの依存関係に従う
-    - 新たな実行基盤は追加しない
+    現在は、最も負荷が高いときに合わせた固定のノード数で運用しており、深夜にも同じ費用がかかっています。画面表示のレイテンシを保ちながらノードの費用を下げ、運用の手間も最小限にしたいと考えています。
 
     どうすればよいですか？
   choices:
-    a: "main ブランチをコンパイルするリリース構成を作成し、ワークフロー構成で毎朝5時の実行スケジュールを設定する"
-    b: "各 SQLX と同じ SQL をスケジュールされたクエリとして登録し、依存関係の順になるよう実行時刻をずらす"
-    c: "Cloud Composer 環境を作成し、Dataform のワークフローを実行するタスクを含む DAG を毎朝5時に動かす"
-    d: "Cloud Scheduler から Cloud Run functions を呼び出し、関数の中で60個の SQL を順番に BigQuery に送信する"
+    a: "クラスタのオートスケーリングを有効にし、最小ノード数、最大ノード数、CPU 使用率の目標を設定する"
+    b: "Cloud Scheduler から Cloud Run functions を呼び出し、朝と夕方の前にノード数を増やし、深夜に減らす"
+    c: "ストレージ タイプが HDD のインスタンスを作成してデータを移し、保存の費用を下げる"
+    d: "別のリージョンにクラスタを追加し、マルチクラスタ ルーティングで読み取りを2つのクラスタに分散する"
   answer: [a]
   choiceNotes:
-    a: "正解です。リリース構成で main ブランチのコードをコンパイルし、ワークフロー構成でそのコンパイル結果を cron 形式のスケジュールで実行します。依存関係の順番は Dataform が解決し、追加の基盤も不要です。"
-    b: "前の処理が遅れたり失敗したりしても次の処理が始まってしまい、依存関係を守れません。60個のスケジュールの管理も大きな負担です。"
-    c: "実行はできますが、Cloud Composer 環境という新たな基盤を追加することになり、要件に反します。"
-    d: "依存関係の解決やエラー処理を自分たちで実装することになり、Dataform で定義した依存関係を活かせません。関数という新たな実行基盤も増えます。"
+    a: "正解です。オートスケーリングでは、CPU 使用率とストレージの使用率に応じて、指定した範囲でノード数が自動で増減します。深夜は負荷に合わせてノード数が減り、台風のときのような予測できない負荷の増加にも追従します。"
+    b: "時間帯による増減はできますが、台風や大雨のときのような予測できない負荷の増加には対応できません。関数とスケジュールの作成・保守も必要になります。"
+    c: "HDD で下がるのは保存の費用で、ノードの費用は下がりません。1行単位の読み取りが遅くなるため、画面表示のレイテンシも保てません。"
+    d: "クラスタを追加すると、そのノードの費用が増えます。深夜に使われないノードの費用も、2つのクラスタでかかり続けます。"
   explanation: |
-    Dataform のコードを定期実行するには、Dataform に組み込まれた **リリース構成** と **ワークフロー構成** を組み合わせます。
+    Bigtable のクラスタのノード数は、**手動の割り当て** か **オートスケーリング** で管理します。
 
-    | 設定 | 役割 |
-    | --- | --- |
-    | リリース構成 | Git のブランチ・タグ・コミットを指定してコードをコンパイルする。コンパイルの頻度（cron 形式）や、コンパイル時の変数の上書きも設定できる |
-    | ワークフロー構成 | リリース構成の最新のコンパイル結果から、実行するアクション（全部、またはタグで選択）と実行の頻度（cron 形式）を指定して実行する |
+    | 方法 | ノード数の決まり方 | 向いている負荷 |
+    | --- | --- | --- |
+    | 手動の割り当て | 指定した数で固定する | 一定で、予測しやすい負荷 |
+    | オートスケーリング | 最小・最大の範囲で、CPU 使用率とストレージの使用率に応じて自動で増減する | 時間帯で変わる負荷、予測できない急増 |
 
-    ポイント
-    - ワークフロー構成は、リリース構成の最新のコンパイル結果を実行する。main ブランチの変更を反映させるには、実行より前にコンパイルが済むようにリリース構成の頻度を設定する
-    - 開発用のワークスペースは開発とテストのための場所で、本番の定期実行はリリース構成とワークフロー構成で行う
-    - ほかのサービスの処理と組み合わせる必要がある場合は、Cloud Composer や Workflows から Dataform のワークフローを呼び出す
+    オートスケーリングのポイント
+
+    - 設定するのは、最小ノード数、最大ノード数、CPU 使用率の目標です。保存しているデータ量に必要なノード数も考慮されます。
+    - 設定はクラスタごとに行います。レプリケーションしているインスタンスでは、クラスタごとにオートスケーリングを設定します。
+    - ノードを追加してから性能に反映されるまでには時間がかかります。大きなイベントのように事前にわかっている急増には、前もって最小ノード数を引き上げておきます。
+    - 最大ノード数に達すると、それ以上はノードが増えません。Cloud Monitoring で CPU 使用率やレイテンシを監視し、最大ノード数が足りているかを確認します。
   references:
-    - title: "実行をスケジュールする"
-      url: "https://docs.cloud.google.com/dataform/docs/schedule-runs"
-    - title: "コンパイルを構成する"
-      url: "https://docs.cloud.google.com/dataform/docs/configure-compilation"
+    - title: "オートスケーリング"
+      url: "https://docs.cloud.google.com/bigtable/docs/autoscaling"
+    - title: "インスタンス、クラスタ、ノード"
+      url: "https://docs.cloud.google.com/bigtable/docs/instances-clusters-nodes"
 
 - id: maintain-cost-018
   domain: maintain

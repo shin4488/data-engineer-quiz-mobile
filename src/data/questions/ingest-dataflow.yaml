@@ -40,46 +40,50 @@
 
 - id: ingest-dataflow-002
   domain: ingest
-  services: [dataflow, networking, vpc-sc]
+  services: [dataflow, pubsub]
   type: multiple
   question: |
-    ある金融機関では、組織のポリシーで VM への外部 IP アドレスの付与が禁止されています。データエンジニアは、Cloud Storage のファイルを読み込んで BigQuery に書き込む Dataflow のバッチジョブを、社内用のカスタム VPC のサブネットで実行しようとしています。ワーカーにはインターネットへの経路を持たせずに、Google Cloud の API にはアクセスできるようにする必要があります。
+    ある引越しサービスの会社は、Web サイトから届く見積もり依頼のイベントを Pub/Sub から読み取る Dataflow のストリーミング パイプライン（Java）で、依頼に含まれる住所を社内の住所正規化 API（REST）に送り、正規化した住所をイベントに付け加えています。この API は受け取った住所ごとに結果を返し、1回の要求で最大100件の住所をまとめて受け付けます。
 
-    どの対応を組み合わせるべきですか？
+    現在は、ParDo の要素ごとの処理の中で HTTP クライアントを作成し、1件ずつ API を呼び出しています。依頼が増えるにつれて、API の呼び出し回数の上限に達してエラーが増え、ワーカーでは接続の確立にも多くの時間がかかるようになりました。正規化した住所が付くのが数秒遅れても問題はありません。
+
+    API の呼び出し回数と接続のオーバーヘッドを減らすには、どの対応を組み合わせるべきですか？
   choices:
-    a: "パイプライン オプションで、ワーカーに外部 IP アドレスを割り当てない設定を指定する"
-    b: "ワーカーが使うサブネットで、限定公開の Google アクセスを有効にする"
-    c: "サブネットのリージョンに Cloud NAT を構成し、ワーカーの通信を NAT 経由にする"
-    d: "VPC Service Controls の境界を作成し、Dataflow と BigQuery のプロジェクトを含める"
-    e: "ワーカーのネットワーク タグに対して、0.0.0.0/0 への下り通信を許可するルールを作る"
+    a: "HTTP クライアントを DoFn の @Setup メソッドで作成し、同じ DoFn のインスタンスが処理する要素で再利用する"
+    b: "GroupIntoBatches で要素を最大100件ずつまとめ、まとめた単位で API にバッチ要求を送る"
+    c: "最大ワーカー数を増やし、API を並列に呼び出す数を増やして、処理が遅れないようにする"
+    d: "API を呼び出す ParDo の前に Reshuffle を挿入し、要素をワーカー間に均等に分散させる"
+    e: "呼び出しに失敗した要素は、間隔を空けずにその場で再試行し、成功してから次の要素を処理する"
   answer: [a, b]
   choiceNotes:
-    a: "正解です。Java は `--usePublicIps=false`、Python は `--no_use_public_ips` を指定すると、ワーカーは内部 IP アドレスだけで起動します。組織のポリシーにも違反しません。"
-    b: "正解です。限定公開の Google アクセスを有効にしたサブネットでは、内部 IP アドレスだけの VM から Cloud Storage や BigQuery などの Google API にアクセスできます。"
-    c: "Cloud NAT はインターネット上の宛先に出ていくための仕組みです。ワーカーにインターネットへの経路を持たせないという要件に反します。"
-    d: "VPC Service Controls はデータの持ち出しを防ぐための境界で、内部 IP アドレスだけの VM に Google API への経路を与える機能ではありません。"
-    e: "ファイアウォール ルールは通信を許可・拒否するだけで、経路は作りません。外部 IP アドレスがない VM は、このルールだけでは外部に出られません。"
+    a: "正解です。@Setup（Python では setup）は DoFn のインスタンスごとに1回呼ばれるため、ネットワーク接続のように作成に時間がかかるリソースの初期化に向いています。要素ごとにクライアントを作り直す必要がなくなります。"
+    b: "正解です。GroupIntoBatches は、キーごとに要素を指定した件数までまとめて出力します。100件ずつ API を呼び出せば、呼び出し回数を大きく減らせます。ストリーミングでは最大の待ち時間も指定し、件数がそろわなくても一定の時間で送るようにします。"
+    c: "並列に呼び出す数が増えるだけで、呼び出しの総数は変わりません。API の呼び出し回数の上限には、かえって早く達します。"
+    d: "要素の分散のしかたが変わるだけで、要素ごとに API を呼び出す回数は変わりません。接続のオーバーヘッドも減りません。"
+    e: "上限に達している API に間隔を空けずに要求を送り続けるため、エラーがさらに増えます。再試行するときは、間隔を徐々に広げる指数バックオフを使います。"
   explanation: |
-    **内部 IP アドレスだけで Dataflow を動かす構成** は、試験で頻出です。
+    外部のサービスを呼び出す変換では、**接続の再利用** と **呼び出しのバッチ化** が、性能と安定性の鍵になります。
 
-    1. パイプライン オプションで外部 IP アドレスを無効にする
-       - Java: `--usePublicIps=false`
-       - Python: `--no_use_public_ips`
-    2. `--subnetwork`（または `--network`）で、ワーカーを起動するサブネットを指定する
-    3. そのサブネットで **限定公開の Google アクセス** を有効にする
+    DoFn には、呼ばれる単位の異なるメソッドがあります。
 
-    | 宛先 | 必要なもの |
-    | --- | --- |
-    | Google API（Cloud Storage、BigQuery、Pub/Sub など） | 限定公開の Google アクセス |
-    | インターネット上の API やパッケージ リポジトリ | Cloud NAT（または外部 IP アドレス） |
-    | オンプレミスや他の VPC | Cloud VPN、Cloud Interconnect、VPC ネットワーク ピアリング |
+    | メソッド | 呼ばれる単位 | 主な用途 |
+    | --- | --- | --- |
+    | @Setup / @Teardown | DoFn のインスタンスごと | クライアントや接続の作成と破棄 |
+    | @StartBundle / @FinishBundle | バンドルごと | バンドル内の要素をまとめた書き込みなど |
+    | @ProcessElement | 要素ごと | 要素ごとの変換 |
 
-    Python のパイプラインで依存パッケージを PyPI から実行時に取得する構成は、インターネットに出られないと失敗します。依存関係はカスタム コンテナや Flex テンプレートのイメージに含めておきます。
+    **GroupIntoBatches** のポイント
+
+    - キーと値の組（KV）を入力にして、キーごとに要素をまとめます。Java では `GroupIntoBatches.ofSize(100)` で件数の上限を、`withMaxBufferingDuration` で最大の待ち時間を指定します。
+    - まとめる単位はキーごとなので、キーの種類が少ないと並列度が下がります。`withShardedKey()`（Python では `GroupIntoBatches.WithShardedKey`）を使うと、同じキーの要素を複数のシャードに分けて並列に処理できます。
+    - ウィンドウは保たれ、1つのバッチには同じウィンドウの要素だけが入ります。
+
+    バンドルの大きさは Dataflow が決めるため、件数のそろったバッチで呼び出したい場合は、@StartBundle と @FinishBundle でまとめるより GroupIntoBatches が向いています。
   references:
-    - title: "インターネット アクセスとファイアウォール ルールを構成する"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/routes-firewall"
-    - title: "限定公開の Google アクセス"
-      url: "https://docs.cloud.google.com/vpc/docs/private-google-access"
+    - title: "Dataflow パイプラインのベスト プラクティス"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/pipeline-best-practices"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
 
 - id: ingest-dataflow-003
   domain: ingest
@@ -212,44 +216,42 @@
 
 - id: ingest-dataflow-006
   domain: ingest
-  services: [dataflow, kms]
+  services: [dataflow]
   type: single
   question: |
-    ある医療機関は、患者の検査データを加工する Dataflow のバッチ パイプラインを asia-northeast1 リージョンで実行しています。社内規程により、パイプラインが処理の途中で保存するデータ（ワーカーの永続ディスクやシャッフルのデータなど）も、自組織で管理する Cloud KMS の鍵で暗号化しなければなりません。パイプラインのコードは変更したくありません。
+    ある電子書籍ストアは、作品ごとの購入件数を5分間の固定ウィンドウで集計する Dataflow のストリーミング パイプライン（Java）を開発しています。ウィンドウには、ウォーターマークがウィンドウの終わりに達する前に途中の結果を出す早期の発火と、ウォーターマークを過ぎてから10分以内に届いたイベントで結果を出し直す遅延の発火を設定しています。
 
-    要件を満たすには、どうすればよいですか？
+    チームは、このウィンドウとトリガーの動きを、コードを変更するたびに CI で自動的にテストしたいと考えています。テストは Google Cloud のリソースを使わずに短時間で終わり、実行するたびに同じ結果になる必要があります。
+
+    どのようにテストすべきですか？
   choices:
-    a: "asia-northeast1 に Cloud KMS の鍵を作成し、ジョブの起動時にパイプライン オプション `--dataflowKmsKey` で指定する"
-    b: "どのリージョンのジョブでも使えるように global ロケーションに Cloud KMS の鍵を作成し、起動時に `--dataflowKmsKey` で指定する"
-    c: "顧客指定の暗号鍵（CSEK）を生成して安全な場所に保管し、ジョブの起動時にパイプライン オプションでワーカーの永続ディスクの鍵として指定する"
-    d: "各 DoFn の中で Cloud KMS の API を呼び出し、レコードを暗号化してから次の変換に渡すようにパイプラインを書き換える"
+    a: "TestStream で要素の追加とウォーターマークの進め方を指定し、Direct Runner で実行して PAssert で出力を検証する"
+    b: "Create.timestamped で要素にイベント時刻を付けた入力を作り、Direct Runner で実行して PAssert で出力を検証する"
+    c: "テスト用の Pub/Sub トピックに時刻をずらしてテスト データを発行し、Dataflow Runner で実行したジョブの出力を期待値と比べる"
+    d: "過去のイベントを保存したファイルを読み込むバッチ ジョブとして Dataflow Runner で実行し、出力を期待値のファイルと比べる"
   answer: [a]
   choiceNotes:
-    a: "正解です。`--dataflowKmsKey`（Python は `--dataflow_kms_key`）で顧客管理の暗号鍵（CMEK）を指定すると、ワーカーの永続ディスクやシャッフルの状態などのパイプラインの状態が、その鍵で保護されます。鍵はジョブと同じリージョンに作成します。"
-    b: "CMEK の鍵のロケーションは、ジョブのリージョンと同じにする必要があります。Dataflow では global やマルチリージョンの鍵ではなく、ジョブと同じリージョンの鍵を使います。"
-    c: "Dataflow で鍵を指定してパイプラインの状態を暗号化する仕組みは、Cloud KMS の鍵を使う CMEK です。CSEK は鍵そのものを利用者が保管して渡す方式で、Cloud KMS の鍵で暗号化するという社内規程にも合いません。"
-    d: "コードの変更が必要で、要件に反します。レコード単位で暗号化と復号を行うため、処理の負荷も大きくなります。"
+    a: "正解です。TestStream では、要素を追加するタイミングと、ウォーターマークや処理時刻を進めるタイミングをテストのコードで指定できます。遅延データや早期・遅延の発火を毎回同じ順序で再現でき、Direct Runner ならローカルで実行できます。"
+    b: "Create で作る入力は境界のあるデータで、すべての要素を読み終えた時点でウォーターマークが最後まで進みます。ウォーターマークより後に届く遅延データや、発火のタイミングの違いを再現できません。"
+    c: "Pub/Sub と Dataflow のリソースが必要で、テストに時間と費用がかかります。要素が届く順序やウォーターマークの進み方が実行のたびに変わるため、同じ結果になるとも限りません。"
+    d: "Google Cloud のリソースが必要です。また、境界のある入力をバッチで処理するため、遅延データや早期の発火など、ストリーミングでのトリガーの動きを確かめられません。"
   explanation: |
-    Dataflow で **顧客管理の暗号鍵（CMEK）** を使う手順です。
+    ストリーミング パイプラインのテストでは、**どの要素がいつ届き、ウォーターマークがどこまで進んだか** を再現できるかどうかが重要です。
 
-    1. ジョブと **同じリージョン** に Cloud KMS の鍵を作成する（global やマルチリージョンの鍵は使わない）
-    2. **Dataflow サービス アカウント**（`service-<プロジェクト番号>@dataflow-service-producer-prod.iam.gserviceaccount.com`）と **Compute Engine サービス アカウント**（`service-<プロジェクト番号>@compute-system.iam.gserviceaccount.com`）に、その鍵に対する `roles/cloudkms.cryptoKeyEncrypterDecrypter` ロールを付与する
-    3. ジョブの起動時に `--dataflowKmsKey`（Python は `--dataflow_kms_key`）で鍵を指定する
+    | 入力の作り方 | 再現できること | 向いているテスト |
+    | --- | --- | --- |
+    | Create（境界のある入力） | 要素の値とイベント時刻 | 変換の結果、ウィンドウへの割り当て |
+    | TestStream（境界のない入力） | 上記に加えて、要素の届く順序、ウォーターマークと処理時刻の進み方 | 遅延データ、早期・遅延の発火、累積モード |
 
-    **CMEK で保護されるもの・されないもの**
-
-    | 対象 | CMEK の適用 |
-    | --- | --- |
-    | ワーカーの永続ディスク、Dataflow Shuffle や Streaming Engine に保存される状態 | 指定した鍵で暗号化される |
-    | ジョブのメタデータ（ジョブ名、パラメータの値、パイプライン グラフなど） | 対象外（Google が管理する暗号化） |
-    | ソースとシンク（Cloud Storage、BigQuery など） | それぞれのリソース側で CMEK を設定する |
-
-    ジョブのメタデータは CMEK の対象外なので、ジョブ名やパラメータに機密情報を含めないようにします。
+    - TestStream では、要素の追加（`addElements`）、ウォーターマークを進める操作（`advanceWatermarkTo`）、処理時刻を進める操作（`advanceProcessingTime`）を順に並べて入力を作ります。
+    - PAssert では、ウィンドウを指定した検証（`inWindow`）や、ウォーターマークがウィンドウの終わりを過ぎたときに出た結果だけの検証（`inOnTimePane`）ができます。
+    - テストは JUnit のルールの TestPipeline を使い、ローカルで動く Direct Runner で実行します。CI の単体テストに向いています。
+    - 本番に近い条件での確認は、Dataflow Runner を使った結合テストやエンドツーエンドのテストで別に行います。
   references:
-    - title: "顧客管理の暗号鍵を使用する"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/customer-managed-encryption-keys"
-    - title: "パイプライン オプション"
-      url: "https://docs.cloud.google.com/dataflow/docs/reference/pipeline-options"
+    - title: "Dataflow パイプラインの開発とテスト"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/develop-and-test-pipelines"
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
 
 - id: ingest-dataflow-007
   domain: ingest
