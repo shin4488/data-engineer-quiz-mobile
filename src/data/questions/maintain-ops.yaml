@@ -11,17 +11,17 @@
 
     どのアラートを設定すべきですか？
   choices:
-    a: "Dataflow のワーカーの CPU 使用率が90%を超えたら通知するアラート"
-    b: "Dataflow ジョブのデータの鮮度（data freshness）が5分を超えたら通知するアラート"
-    c: "Pub/Sub トピックへのパブリッシュ リクエスト数が急減したら通知するアラート"
-    d: "サブスクリプションの未確認メッセージの最古の経過時間が、しきい値を超えたら通知するアラート"
-    e: "BigQuery の予約のスロット使用率が80%を超えたら通知するアラート"
+    a: "Dataflow のワーカーの CPU 使用率が、90%を超えたら通知するアラート"
+    b: "Dataflow ジョブのデータの鮮度が、5分を超えたら通知するアラート"
+    c: "Pub/Sub トピックへのパブリッシュ数が、5分間ゼロになったら通知するアラート"
+    d: "サブスクリプションの最も古い未確認メッセージの経過時間が、5分を超えたら通知するアラート"
+    e: "BigQuery の予約のスロット使用率が、80%を超えたら通知するアラート"
   answer: [b, d]
   choiceNotes:
     a: "CPU 使用率が高くても処理が間に合っている場合があり、逆に外部 API の応答待ちなどで CPU 使用率が低いまま遅れる場合もあります。データの古さは直接検知できません。"
     b: "正解です。データの鮮度は、現在の時刻と、パイプラインが処理し終えたデータの時刻（データのウォーターマーク）との差です。値が大きいほど出力が古くなっているため、「5分以内」という要件を直接監視できます。"
-    c: "パブリッシュ数の減少は、送信側（トラック側）の問題の検知には役立ちます。しかし、受信側での処理の遅れや滞留は検知できません。"
-    d: "正解です。確認応答（ack）されていない最も古いメッセージの経過時間が伸び続けている場合、サブスクライバーがメッセージを処理しきれずに滞留しています。"
+    c: "パブリッシュが止まったことは、送信側（トラック側）の問題の検知には役立ちます。しかし、受信側での処理の遅れや滞留は検知できません。"
+    d: "正解です。確認応答（ack）されていない最も古いメッセージの経過時間が伸びている場合、サブスクライバー（ここでは Dataflow）がメッセージを受け取りきれず、サブスクリプションに滞留しています。"
     e: "Dataflow から BigQuery へのストリーミング書き込みは、クエリ用の予約のスロットを消費しません。パイプラインの遅れの検知には使えません。"
   explanation: |
     ストリーミング パイプラインの遅れは、**処理がどこまで進んでいるか** と **入口でどれだけ滞留しているか** の両方を監視すると早く気づけます。
@@ -30,11 +30,11 @@
     | --- | --- | --- |
     | Dataflow | データの鮮度（`job/data_watermark_age`） | 出力されるデータがどれだけ古いか |
     | Dataflow | システム レイテンシ（`job/system_lag`） | データが処理中または処理待ちになっている最大の時間 |
-    | Pub/Sub | 未確認メッセージの最古の経過時間（`subscription/oldest_unacked_message_age`） | 最も古い未処理のメッセージがどれだけ待たされているか |
+    | Pub/Sub | 最も古い未確認メッセージの経過時間（`subscription/oldest_unacked_message_age`） | 最も古い未処理のメッセージがどれだけ待たされているか |
     | Pub/Sub | 未配信メッセージ数（`subscription/num_undelivered_messages`） | 滞留しているメッセージの件数 |
 
     - 件数の指標は、流量によって正常な値が変わるため、しきい値を決めにくいことがあります。**経過時間** の指標は遅れそのものを表すので、レイテンシの要件と対応づけやすくなります。
-    - Dataflow のジョブの画面に表示される「データの鮮度」や「システム レイテンシ」のグラフから、アラート ポリシーを作成できます。
+    - Dataflow と Pub/Sub の指標は、追加の設定なしで Cloud Monitoring に記録されます。そのままアラート ポリシーの条件に使えます。
     - CPU 使用率などのリソースの指標は、原因の調査には役立ちますが、遅れそのものの検知には向きません。
   diagram: |
     flowchart TD
@@ -42,15 +42,15 @@
       P --> D["Dataflow<br/>ストリーミング"]
       D --> B["BigQuery"]
       B --> V["配車ダッシュボード"]
-      A1["アラート<br/>最古の未確認メッセージの経過時間"] -.->|監視| P
+      A1["アラート<br/>最も古い未確認メッセージの経過時間"] -.->|監視| P
       A2["アラート<br/>データの鮮度"] -.->|監視| D
   references:
-    - title: "Dataflow モニタリング インターフェースを使用する"
+    - title: "Dataflow のジョブの指標"
       url: "https://docs.cloud.google.com/dataflow/docs/guides/using-monitoring-intf"
-    - title: "Google Cloud の指標"
-      url: "https://docs.cloud.google.com/monitoring/api/metrics_gcp"
-    - title: "アラートの概要"
-      url: "https://docs.cloud.google.com/monitoring/alerts"
+    - title: "Dataflow パイプラインで Cloud Monitoring を使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/using-cloud-monitoring"
+    - title: "Cloud Monitoring で Pub/Sub をモニタリングする"
+      url: "https://docs.cloud.google.com/pubsub/docs/monitoring"
 
 - id: maintain-ops-002
   domain: maintain
@@ -67,7 +67,7 @@
     d: "Dataproc クラスタの YARN のメモリ使用量にアラート ポリシーを設定し、使用量が増えたら運用チームに通知する"
   answer: [c]
   choiceNotes:
-    a: "ログベースのアラートは、一致するログが出力されるたびに通知する仕組みで、件数のしきい値は指定できません。許容されている少数の読み飛ばしでも通知されてしまいます。"
+    a: "ログベースのアラートは、条件に一致するログが出力されたときに通知する仕組みで、一定時間の件数をしきい値にすることはできません。許容されている少数の読み飛ばしでも通知されてしまいます。"
     b: "実現はできますが、シンク、スケジュールされたクエリ、関数の作成と保守が必要になり、「独自のコードを書かない」という要件に反します。"
     c: "正解です。ログベースの指標は、条件に一致したログエントリの件数を Cloud Monitoring の指標として記録します。この指標にしきい値のアラート ポリシーを設定すれば、コードを書かずに「10分間で1,000件超」を検知できます。"
     d: "メモリ使用量は不正なレコードの件数とは関係がないため、入力ファイルの異常は検知できません。"
@@ -80,13 +80,15 @@
     | ログベースのアラート ポリシー | 条件に一致するログが出力されたとき | 重大なエラーが1件でも出たら知りたい場合 |
 
     - ログベースの指標には、一致したログの件数を数える **カウンタ型** と、ログに含まれる数値（処理時間など）の分布を記録する **分布型** があります。
-    - ユーザー定義のログベースの指標は、作成した時点以降のログだけを集計します。過去のログには遡りません。
+    - ユーザー定義のログベースの指標は、作成した時点以降に届いたログだけを集計します。過去のログには遡りません。
     - 作成した指標は、アラートだけでなく Cloud Monitoring のグラフやダッシュボードでも使えます。
   references:
-    - title: "アラートの概要"
-      url: "https://docs.cloud.google.com/monitoring/alerts"
-    - title: "Method: projects.metrics.create"
-      url: "https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/projects.metrics/create"
+    - title: "ログをモニタリングする"
+      url: "https://docs.cloud.google.com/logging/docs/alerting/monitoring-logs"
+    - title: "ログベースの指標の概要"
+      url: "https://docs.cloud.google.com/logging/docs/logs-based-metrics"
+    - title: "ログベースの指標のグラフとアラートを構成する"
+      url: "https://docs.cloud.google.com/logging/docs/logs-based-metrics/charts-and-alerts"
 
 - id: maintain-ops-003
   domain: maintain
@@ -103,7 +105,7 @@
     d: "Cloud Monitoring で、バケットへのリクエスト数とテーブルの読み取りバイト数の推移をグラフで確認する"
   answer: [b]
   choiceNotes:
-    a: "BigQuery のクエリは調べられますが、Cloud Storage からのダウンロードは対象外です。2つのリソースをまとめて調査するという要件を満たしません。"
+    a: "BigQuery のジョブは調べられますが、Cloud Storage からのダウンロードは調べられません。バケットにアクセスしたアカウントを特定するという要件を満たしません。"
     b: "正解です。データの読み取りやダウンロードは、データアクセス監査ログに記録されます。BigQuery のデータアクセス監査ログは既定で記録され、Cloud Storage も有効にしてあるため、1か所で両方を調べられます。"
     c: "管理アクティビティ監査ログは、リソースの作成・削除や IAM ポリシーの変更などの管理操作を記録するもので、データの読み取りやダウンロードは記録されません。"
     d: "指標からアクセス量の変化はわかりますが、誰がアクセスしたかは特定できません。"
@@ -137,9 +139,9 @@
     追加の設定をせずに、すぐにこの分析を行うにはどうすればよいですか？
   choices:
     a: "Cloud Billing のデータを BigQuery にエクスポートし、ユーザーごとの BigQuery の料金を集計する"
-    b: "データアクセス監査ログを BigQuery に転送するログシンクを作成し、ジョブの完了イベントからスロット時間を集計する"
+    b: "データアクセス監査ログを BigQuery に送るログシンクを作成し、ジョブの完了イベントからスロット時間を集計する"
     c: "Cloud Monitoring で BigQuery のスロットの指標のダッシュボードを作成し、ユーザーごとの使用量を比較する"
-    d: "INFORMATION_SCHEMA.JOBS ビューで過去30日間のジョブを、ユーザーごとに total_slot_ms で集計する"
+    d: "INFORMATION_SCHEMA.JOBS ビューを、ユーザーやクエリごとに total_slot_ms で集計する"
   answer: [d]
   choiceNotes:
     a: "課金データは SKU やプロジェクトの単位です。容量ベースの料金（予約）では、ユーザーやクエリごとの料金にはならないため、誰が消費したかはわかりません。"
@@ -188,29 +190,33 @@
   choices:
     a: "INFORMATION_SCHEMA.JOBS_TIMELINE ビューを集計するクエリを作成し、Looker Studio のダッシュボードで可視化する"
     b: "Cloud Billing のレポートで、BigQuery の SKU ごとの料金の推移をプロジェクト別に表示して比較する"
-    c: "BigQuery の管理リソースグラフで期間と予約を指定してスロット使用量を表示し、プロジェクトやユーザーで絞り込む"
+    c: "BigQuery のコンソールの管理リソースグラフで、予約のスロット使用量の推移をプロジェクトやユーザー別に確認する"
     d: "ログ エクスプローラで BigQuery のデータアクセス監査ログを検索し、ジョブの完了イベントを時間帯ごとに確認する"
   answer: [c]
   choiceNotes:
     a: "柔軟な分析はできますが、クエリとダッシュボードの作成・保守が必要になり、要件に反します。"
     b: "料金の推移はわかりますが、予約の料金はユーザーやジョブの単位にはならないため、使用量が増えた原因のジョブを特定できません。"
-    c: "正解です。管理リソースグラフでは、スロット使用量やジョブの同時実行数などを BigQuery のコンソール上のグラフで確認できます。SQL を書いたりダッシュボードを作成したりする必要がありません。"
+    c: "正解です。管理リソースグラフでは、スロット使用量やジョブの同時実行数などの推移を、予約・プロジェクト・ユーザーなどの単位で BigQuery のコンソール上で確認できます。SQL を書いたりダッシュボードを作成したりする必要がありません。"
     d: "個々のジョブは確認できますが、スロット使用量の推移をつかむには集計の手間がかかり、グラフで把握するという目的に合いません。"
   explanation: |
     BigQuery の使用状況を把握する方法は、目的に応じて使い分けます。
 
     | 方法 | 特徴 |
     | --- | --- |
-    | 管理リソースグラフ | スロット使用量、ジョブの同時実行数、ジョブの実行時間、エラーなどをコンソールのグラフで確認できる。予約・プロジェクト・ユーザーなどで絞り込める |
+    | 管理リソースグラフ | スロット使用量、ジョブの同時実行数、ジョブの実行時間、エラーなどの推移をコンソールのグラフで確認できる |
+    | 管理ジョブ エクスプローラ | 組織やプロジェクトのジョブを、状態・所有者・プロジェクト・予約などで絞り込んだり、まとめて集計したりできる |
     | INFORMATION_SCHEMA（JOBS、JOBS_TIMELINE など） | SQL で自由に集計できる。独自のレポートや定期的な分析に向く |
     | Cloud Monitoring | 指標にアラート ポリシーを設定し、しきい値を超えたときに通知できる |
     | Cloud Billing のデータのエクスポート | 料金をプロジェクト・サービス・ラベル別に分析できる |
 
-    - 管理リソースグラフは INFORMATION_SCHEMA のデータをもとに表示されます。閲覧には、組織やプロジェクトのジョブと予約を参照できる権限（`roles/bigquery.resourceViewer` など）が必要です。
+    - グラフで使用量が増えた時間帯を見つけ、管理ジョブ エクスプローラで個々のジョブを確認する、という順に調べると効率的です。
+    - 閲覧には、組織やプロジェクトのジョブと予約を参照できる権限が必要です。BigQuery リソース閲覧者（`roles/bigquery.resourceViewer`）などのロールを付与します。
     - 予約が計画どおりに使われているか（ベースラインを常に超えて自動スケーリングに頼っていないか、逆に余っていないか）を定期的に確認し、予約のサイズや割り当ての見直しにつなげます。
   references:
-    - title: "予約の概要"
-      url: "https://docs.cloud.google.com/bigquery/docs/reservations-intro"
+    - title: "健全性とリソース使用率をモニタリングする"
+      url: "https://docs.cloud.google.com/bigquery/docs/admin-resource-charts"
+    - title: "ジョブをモニタリングする"
+      url: "https://docs.cloud.google.com/bigquery/docs/admin-jobs-explorer"
     - title: "JOBS_TIMELINE ビュー"
       url: "https://docs.cloud.google.com/bigquery/docs/information-schema-jobs-timeline"
 
@@ -226,15 +232,15 @@
 
     それぞれのエラーを解消するために、どの対応を行うべきですか？
   choices:
-    a: "ファイルを数分ごとにまとめて読み込むか、Storage Write API によるストリーミング書き込みに切り替える"
-    b: "割り当てのページから、テーブルの更新操作の頻度の上限を引き上げるようリクエストし、承認を待つ"
+    a: "ファイルを数分ごとにまとめて読み込むか、Storage Write API による書き込みに切り替える"
+    b: "割り当てのページで、テーブルの更新操作の頻度の上限を引き上げるようリクエストし、承認を待つ"
     c: "予約のベースライン スロットを増やし、並べ替えのクエリが使えるスロットとメモリを増やす"
-    d: "失敗した読み込みジョブを、間隔を空けずにすぐ再試行するようアプリケーションを変更して取りこぼしを防ぐ"
-    e: "全件の並べ替えをやめ、並べ替えが必要な場合は LIMIT で件数を絞るか、必要な範囲に絞り込んでから並べ替える"
+    d: "失敗した読み込みジョブを、間隔を空けずにすぐ再試行するようアプリケーションを変更する"
+    e: "全件の並べ替えをやめ、必要なら LIMIT や条件で件数を絞ってから並べ替える"
   answer: [a, e]
   choiceNotes:
-    a: "正解です。テーブルごとの更新操作（読み込みジョブ、クエリ結果の書き込みなど）には、短時間あたりの頻度の上限があります。ジョブの回数を減らすか、ストリーミング書き込みに切り替えると解消します。"
-    b: "テーブル単位の更新頻度の上限は、引き上げを申請できる割り当てではありません。更新の回数を減らす必要があります。"
+    a: "正解です。テーブルごとの更新操作（読み込みジョブ、クエリ結果の書き込みなど）には、短時間あたりの頻度の上限があります。読み込みの回数を減らすか、Storage Write API で書き込むと解消します。"
+    b: "上限の引き上げを待っても、数秒ごとに読み込む設計は変わらず、ファイルが増えれば再び上限にかかります。ドキュメントでも、操作をまとめる、Storage Write API に移行するなど、更新の回数を減らす対応が推奨されています。"
     c: "スロットを増やしても、全件の並べ替えに必要なメモリの問題は解消しません。クエリの書き方を見直す必要があります。"
     d: "レート制限のエラーは、すぐに再試行するとさらに制限にかかりやすくなります。再試行するなら指数バックオフで間隔を空けますが、根本的には更新の回数を減らす必要があります。"
     e: "正解です。全件を ORDER BY で並べ替えると、最後の並べ替えの段階でメモリが不足しやすくなります。結果をテーブルに書き出す場合、テーブルの行には順序がないため、全件の並べ替えはそもそも不要です。"
@@ -253,6 +259,8 @@
   references:
     - title: "エラー メッセージ"
       url: "https://docs.cloud.google.com/bigquery/docs/error-messages"
+    - title: "割り当てと上限のエラーのトラブルシューティング"
+      url: "https://docs.cloud.google.com/bigquery/docs/troubleshoot-quotas"
     - title: "割り当てと上限"
       url: "https://docs.cloud.google.com/bigquery/quotas"
 
@@ -268,7 +276,7 @@
     コードの変更を最小限に抑えてジョブを安定させるには、どうすればよいですか？
   choices:
     a: "セカンダリ ワーカーを追加してクラスタのワーカー数を増やし、処理をより多くのノードに分散して1台あたりの負荷を下げる"
-    b: "spark.executor.memoryOverhead をジョブのプロパティで増やし、必要ならメモリの多いマシンタイプに変更する"
+    b: "spark.executor.memoryOverhead を増やし、必要ならメモリの多いマシンタイプに変える"
     c: "spark.executor.cores を増やし、1つのエグゼキュータで同時に実行するタスクの数を増やして処理を速く終わらせる"
     d: "ワーカーのブートディスクのサイズを増やし、シャッフルやディスクへの書き出しに使える容量を確保する"
   answer: [b]
@@ -289,48 +297,56 @@
     - プロパティは、ジョブの送信時（`gcloud dataproc jobs submit pyspark --properties=...`）やクラスタの作成時に指定できます。
     - ワーカーのメモリ自体が足りない場合は、highmem 系のマシンタイプに変更します。
     - 結合で一部のキーにデータが集中している場合は、パーティション数の調整やキーの分散も検討します。
+
+    なお、最近のドキュメントでは、Dataproc（Dataproc on Compute Engine）は Managed Service for Apache Spark のクラスタ デプロイという名称になっています。試験ガイドでは Dataproc の名称が使われています。
   references:
     - title: "クラスタのプロパティ"
       url: "https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/cluster-properties"
-    - title: "Dataproc の指標"
-      url: "https://docs.cloud.google.com/dataproc/docs/guides/dataproc-metrics"
+    - title: "VM のメモリ不足エラーのトラブルシューティング"
+      url: "https://docs.cloud.google.com/managed-spark/docs/support/troubleshoot-oom-errors"
 
 - id: maintain-ops-008
   domain: maintain
-  services: [dataflow]
+  services: [dataflow, monitoring]
   type: single
   question: |
-    あるネット広告企業は、広告のクリックイベントを Pub/Sub から読み取り、Dataflow のストリーミング パイプラインで広告主 ID ごとに1分間のクリック数を集計しています。集計では、GroupByKey で広告主 ID ごとに要素をまとめてから合計しています。大口の広告主のキャンペーンが始まってからシステム レイテンシが増え続け、ワーカーを増やしても改善しません。ジョブのログには、集計のステップでホットキーが検出されたという警告が出ています。
+    ある不動産情報サイトは、毎晩 Dataflow のバッチジョブ（Java）で約2億件の物件データを正規化し、BigQuery に書き込んでいます。住所の表記をそろえる処理を追加してから、ジョブの実行時間が約2倍になりました。ワーカーの CPU 使用率は常に90%を超えていますが、エラーやホットキーの警告は出ていません。ジョブグラフで各ステップの経過時間を確認したところ、住所の表記をそろえる ParDo のステップに時間がかかっていることがわかりました。
 
-    集計結果を変えずに遅延を解消するには、どうすればよいですか？
+    開発チームは、このステップのコードのうち、どのメソッドが CPU を多く使っているかを特定したいと考えています。そのためにコードを変更したり、ワーカーで手作業の調査をしたりすることは避けたいと考えています。
+
+    どうすればよいですか？
   choices:
-    a: "最大ワーカー数を引き上げ、オートスケーリングでより多くのワーカーを使って集計を並列に処理できるようにする"
-    b: "GroupByKey の直前に Reshuffle を追加し、要素をワーカー間で均等に再分配してから集計する"
-    c: "ワーカーのマシンタイプを vCPU とメモリの多いものに変更し、1台あたりの処理能力を上げる"
-    d: "GroupByKey と合計を Combine.perKey に置き換え、hot key fanout で部分集計を複数のワーカーに分散する"
-  answer: [d]
+    a: "Cloud Monitoring の Metrics Explorer で、ワーカー VM ごとの CPU 使用率の推移を表示し、負荷の高い時間帯を特定する"
+    b: "住所の表記をそろえる処理の各メソッドに、処理時間を出力するログを追加し、Cloud Logging で集計する"
+    c: "Cloud Profiler を有効にするサービス オプションを指定してジョブを実行し、メソッドごとの負荷を確認する"
+    d: "ワーカー VM に SSH で接続し、Java のスレッドダンプを繰り返し取得して、実行中のメソッドを集計する"
+  answer: [c]
   choiceNotes:
-    a: "同じキーの要素は1か所で処理されるため、ワーカーを増やしてもそのキーの処理は並列化されません。問題文のとおり、改善は見込めません。"
-    b: "Reshuffle で再分配しても、その後の GroupByKey で同じキーの要素は再び1か所に集まります。ホットキーは解消しません。"
-    c: "1台の性能を上げると多少改善する可能性はありますが、1つのキーに処理が集中する構造は変わらず、流量が増えれば再び遅延します。"
-    d: "正解です。hot key fanout を指定すると、集中しているキーの部分集計を複数のワーカーで並列に行い、最後に合算します。合計のように結合則が成り立つ集計なら、結果を変えずに負荷を分散できます。"
+    a: "CPU 使用率は VM 単位の指標で、どのメソッドが CPU を使っているかはわかりません。"
+    b: "メソッドごとの時間はわかりますが、コードの変更が必要になり、要件に反します。"
+    c: "正解です。Dataflow は Cloud Profiler と統合されており、ジョブの起動時にサービス オプションを指定するだけで、ワーカー上のコードの CPU 時間をメソッドごとに収集できます。結果はフレームグラフで確認できます。"
+    d: "実行中のメソッドは調べられますが、多数のワーカーで手作業の調査が必要になり、要件に反します。"
   explanation: |
-    **ホットキー** は、GroupByKey や Combine の対象のキーのうち、特定のキーに要素が集中している状態です。同じキーの要素は1つのワーカーで処理されるため、ワーカーを増やしても並列化されません。
+    Dataflow のパイプラインの性能の問題は、調べる範囲を絞り込みながら原因を探します。
 
-    切り分けと対策の流れ：
+    | 調べたいこと | 使う機能 |
+    | --- | --- |
+    | ジョブ全体の遅れやスループット | ジョブの指標（Cloud Monitoring、ジョブの画面のグラフ） |
+    | どのステップが遅いか | ジョブグラフの各ステップの情報、ストラグラーやボトルネックの検出 |
+    | ステップのコードのどこが CPU やメモリを使っているか | Cloud Profiler |
+    | どのキーに処理が集中しているか | ホットキーのログ出力（Java は `--hotKeyLoggingEnabled`、Python は `--enable_hot_key_logging`） |
+    | エラーの内容 | ワーカーのログ（Cloud Logging） |
 
-    1. ジョブのログで、ホットキーが検出されたという警告を確認する
-    2. どのキーかを特定したい場合は、ホットキーのログ出力（Java は `--hotKeyLoggingEnabled`、Python は `--enable_hot_key_logging`）を有効にする
-    3. 合計や件数のように部分集計を合算できる処理なら、**Combine.perKey と hot key fanout**（Java は `withHotKeyFanout`、Python は `with_hot_key_fanout`）で分散する
-    4. それ以外の処理なら、キーにランダムな値を付け足して分散し、後でまとめ直す方法を検討する
-
-    - GroupByKey で全要素を集めてから合計するより、Combine のほうがワーカー内で事前に集計できるため、シャッフルするデータ量も減ります。
-    - ホットキーのログ出力では、キーの値がそのままログに記録されます。個人情報を含むキーでは注意が必要です。
+    - Cloud Profiler は、ジョブの起動時にサービス オプション `enable_google_cloud_profiler` を指定して有効にします（Java は `--dataflowServiceOptions`、Python は `--dataflow_service_options`）。Java では、ヒープのプロファイリングも使えます。
+    - ワーカーのサービス アカウントには、プロファイルを送信する権限（Cloud Profiler エージェントのロール `roles/cloudprofiler.agent` など）が必要です。
+    - プロファイリングによる負荷は小さいため、本番のジョブでも使えます。
   references:
-    - title: "Dataflow のエラーのトラブルシューティング"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/common-errors"
-    - title: "パイプライン オプション"
-      url: "https://docs.cloud.google.com/dataflow/docs/reference/pipeline-options"
+    - title: "Cloud Profiler を使用してパイプラインのパフォーマンスをモニタリングする"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/profiling-a-pipeline"
+    - title: "Dataflow のジョブの指標"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/using-monitoring-intf"
+    - title: "低速なストリーミング ジョブのトラブルシューティング"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/troubleshoot-slow-streaming-jobs"
 
 - id: maintain-ops-009
   domain: maintain
@@ -343,7 +359,7 @@
   choices:
     a: "最大ワーカー数のパイプライン オプションを400に引き上げ、より多くのワーカーを使えるようにしてから実行する"
     b: "ワーカーのマシンタイプを vCPU の多いものに変更し、少ないワーカー数でも同じ処理量をこなせるようにする"
-    c: "Compute Engine のリージョンの CPU の割り当ての引き上げをリクエストし、承認されてからジョブを実行する"
+    c: "Compute Engine の CPU の割り当てをこのリージョンで引き上げるようリクエストし、承認後にジョブを実行する"
     d: "Cloud Composer の DAG にリトライを設定し、ジョブが遅れたときは自動でキャンセルして再実行する"
   answer: [c]
   choiceNotes:
@@ -364,8 +380,8 @@
     - ワーカーに外部 IP アドレスが不要な場合は、パブリック IP を使わない設定（Python の `--no_use_public_ips` など）にすると、外部 IP アドレスの割り当てを消費しません。この場合は、サブネットで限定公開の Google アクセスを有効にします。
     - 割り当てはプロジェクト内のほかのワークロードと共有されます。定期的に大規模なジョブを実行する場合は、余裕を持った値にしておきます。
   references:
-    - title: "Cloud Quotas の概要"
-      url: "https://docs.cloud.google.com/docs/quotas"
+    - title: "Dataflow の割り当てと上限"
+      url: "https://docs.cloud.google.com/dataflow/quotas"
     - title: "Dataflow のエラーのトラブルシューティング"
       url: "https://docs.cloud.google.com/dataflow/docs/guides/common-errors"
 
@@ -416,10 +432,10 @@
 
     どのようにデプロイすべきですか？
   choices:
-    a: "同じジョブ名と --update オプションを指定し、変更前後のステップ名の対応を transform name mapping で渡して起動する"
+    a: "同じジョブ名で --update を指定し、変更前後のステップ名の対応を transform name mapping で渡す"
     b: "実行中のジョブをドレインし、停止したことを確認してから、新しいバージョンのコードで新しいジョブを起動する"
     c: "実行中のジョブをキャンセルし、停止したら同じサブスクリプションを読み取る新しいバージョンのジョブを起動する"
-    d: "gcloud dataflow jobs update-options コマンドを使い、実行中のジョブに新しいバージョンのコードを反映する"
+    d: "gcloud dataflow jobs update-options コマンドで、実行中のジョブに新しいバージョンのコードを反映する"
   answer: [a]
   choiceNotes:
     a: "正解です。パイプラインを更新すると、新しいジョブが既存のジョブを置き換え、処理中のデータと状態を引き継ぎます。ステップの名前を変えた場合は、名前の対応を指定しないと互換性チェックで失敗します。"
@@ -436,32 +452,32 @@
     | キャンセルしてから新しいジョブを起動 | 失われる | データを失ってもよい場合 |
 
     - 更新では、新しいジョブを **既存のジョブと同じ名前** で起動します。ステップの名前を変えたり削除したりした場合は、`--transformNameMapping`（Python は `--transform_name_mapping`）で対応を指定します。
-    - 起動時に互換性チェックが行われます。失敗した場合は新しいジョブは起動せず、既存のジョブがそのまま動き続けます。
-    - ウィンドウの種類やコーダーの変更、状態を持つステップの削除などは、互換性チェックに失敗する場合があります。
-    - 更新できるのはストリーミング パイプラインだけです。
+    - 起動時に、状態やバッファ中のデータを引き継げるかを確かめる互換性チェックが行われます。失敗した場合は更新されず、既存のジョブがそのまま動き続けます。
+    - 既存のステップへのサイド入力の追加や削除などは、互換性チェックに失敗する変更の例です。
+    - サービス オプション `graph_validate_only` を指定して置き換え用のジョブを送信すると、既存のジョブを止めずに、互換性だけを事前に確かめられます。
   references:
     - title: "既存のパイプラインを更新する"
       url: "https://docs.cloud.google.com/dataflow/docs/guides/updating-a-pipeline"
-    - title: "パイプラインのライフサイクル"
-      url: "https://docs.cloud.google.com/dataflow/docs/pipeline-lifecycle"
+    - title: "ストリーミング パイプラインをアップグレードする"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/upgrade-guide"
 
 - id: maintain-ops-012
   domain: maintain
   services: [dataflow, pubsub]
   type: single
   question: |
-    あるエネルギー企業は、スマートメーターの計測値を Pub/Sub から読み取り、Dataflow のストリーミング パイプラインで5分間の固定ウィンドウごとに集計して BigQuery に書き込んでいます。今回、集計の単位を世帯ごとのセッション ウィンドウに変更し、出力の形式も変えることになりました。--update オプションで新しいバージョンを起動しようとしたところ、互換性チェックに失敗しました。既存のジョブがすでに Pub/Sub から読み取ったメッセージは、失わずに BigQuery まで書き込みたいと考えています。
+    あるエネルギー企業は、スマートメーターの計測値を Pub/Sub から読み取り、Dataflow のストリーミング パイプラインで5分間の固定ウィンドウごとに集計して BigQuery に書き込んでいます。今回、集計の単位を世帯ごとのセッション ウィンドウに変更し、出力の形式も変えることになりました。ステップの名前は変えていません。--update オプションで新しいバージョンを起動しようとしたところ、互換性チェックに失敗しました。既存のジョブがすでに Pub/Sub から読み取ったメッセージは、失わずに BigQuery まで書き込みたいと考えています。
 
     どうすればよいですか？
   choices:
-    a: "既存のジョブをキャンセルし、停止したら同じサブスクリプションを読み取る新しいバージョンのジョブを起動する"
+    a: "既存のジョブをキャンセルし、停止したら同じサブスクリプションを読み取る新しいバージョンを起動する"
     b: "transform name mapping でステップ名の対応を指定し、もう一度 --update オプションで新しいジョブを起動する"
     c: "既存のジョブをドレインし、停止したら同じサブスクリプションを読み取る新しいバージョンのジョブを起動する"
     d: "同じサブスクリプションを読み取る新しいバージョンのジョブを並行して起動し、動作を確認してから既存のジョブをキャンセルする"
   answer: [c]
   choiceNotes:
     a: "キャンセルすると処理はすぐに止まり、すでに読み取って処理中だったデータは失われます。"
-    b: "ステップ名の対応の指定は、ステップの名前を変えた場合の対策です。ウィンドウの構成の変更のような互換性のない変更は、名前の対応を指定しても更新できません。"
+    b: "ステップ名の対応の指定は、ステップの名前を変えた場合の対策です。今回はステップの名前を変えていないため、指定しても互換性チェックの結果は変わりません。"
     c: "正解です。ドレインすると、既存のジョブは新しいメッセージの読み取りをやめ、すでに読み取ったデータの処理と書き込みを終えてから停止します。読み取られていないメッセージはサブスクリプションに残るため、新しいジョブが続きから処理します。"
     d: "同じサブスクリプションを2つのジョブで読み取ると、メッセージがジョブ間で分けて配信され、どちらの集計も不完全になります。既存のジョブをキャンセルした時点で、処理中のデータも失われます。"
   explanation: |
@@ -474,6 +490,7 @@
 
     - 互換性のある変更なら、まず **更新（--update）** を検討します。処理中のデータもウィンドウの状態も引き継げます。
     - 互換性のない変更では、ドレインしてから新しいジョブを起動します。ドレインで途中で閉じられたウィンドウの結果は不完全になるため、出力側での扱いを決めておきます。
+    - Dataflow には、既存のジョブを動かしたまま新しいジョブを準備し、ドレインが終わったら新しいジョブで処理を始める、自動の停止と置き換えの手順もあります。処理が止まる時間を短くできます。
     - ドレインやキャンセルで停止したジョブは再開できません。処理を続けるには新しいジョブを起動します。
   diagram: |
     flowchart TD
@@ -485,8 +502,8 @@
   references:
     - title: "実行中のパイプラインを停止する"
       url: "https://docs.cloud.google.com/dataflow/docs/guides/stopping-a-pipeline"
-    - title: "既存のパイプラインを更新する"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/updating-a-pipeline"
+    - title: "ストリーミング パイプラインをアップグレードする"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/upgrade-guide"
 
 - id: maintain-ops-013
   domain: maintain
@@ -500,7 +517,7 @@
     a: "Pub/Sub のサブスクリプションのスナップショットだけを作成し、問題が起きたらそこへシークしてから元のバージョンのジョブを起動する"
     b: "既存のジョブをドレインして集計途中の結果を BigQuery に書き出し、問題が起きたらそのテーブルを読み込むジョブを起動する"
     c: "出力先の BigQuery テーブルのスナップショットを作成し、問題が起きたらテーブルを復元してから元のバージョンのジョブを起動する"
-    d: "Pub/Sub のソースも含めて Dataflow のスナップショットを作成し、問題が起きたらそのスナップショットから元のバージョンのジョブを作成する"
+    d: "Pub/Sub のソースも含めて Dataflow のスナップショットを作成し、問題が起きたらそこから元のバージョンのジョブを作成する"
   answer: [d]
   choiceNotes:
     a: "メッセージは再処理できますが、パイプラインが保持していたプレイヤーごとのセッションの状態は保存されないため、集計途中の状態が失われます。"
@@ -510,10 +527,11 @@
   explanation: |
     **Dataflow のスナップショット** は、ストリーミング パイプラインの状態を保存する機能です。
 
-    - スナップショットから新しいジョブを作成すると、保存した状態から処理を始められます。更新前のバックアップ、更新の取り消し（ロールバック）、新しいバージョンのテストなどに使います。
-    - Pub/Sub をソースにしている場合は、ソースのスナップショットも同時に作成すると、パイプラインの状態と未処理のメッセージをそろえて保存できます。
-    - スナップショットには有効期限（TTL）があり、既定は7日です。
-    - スナップショットからジョブを作成するには、ジョブの起動時に `--createFromSnapshot`（Python は `--create_from_snapshot`）でスナップショットを指定します。
+    - スナップショットから新しいジョブを作成すると、保存した状態から処理を始められます。バックアップと復旧、更新のテストや取り消し（ロールバック）などに使います。
+    - Pub/Sub をソースにしている場合は、ソースのスナップショットも同時に作成すると（`--snapshot-sources=true`）、パイプラインの状態と未処理のメッセージをそろえて保存できます。
+    - スナップショットには有効期限（TTL）があり、既定は7日、最長は30日です。ただし、同時に作成した Pub/Sub のスナップショットは7日以内に期限が切れます。
+    - スナップショットからジョブを作成するには、ジョブの起動時に `--createFromSnapshot`（Python は `--create_from_snapshot`）でスナップショットを指定し、Streaming Engine を有効にします。
+    - スナップショットの作成中は、ジョブの処理が一時的に止まります。
 
     ```bash
     gcloud dataflow snapshots create \
@@ -527,10 +545,10 @@
     | Pub/Sub のスナップショット | サブスクリプションの確認応答の状態（未処理のメッセージ） |
     | BigQuery のテーブル スナップショット | テーブルのある時点のデータ |
   references:
+    - title: "Dataflow スナップショットを使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/using-snapshots"
     - title: "gcloud dataflow snapshots create"
       url: "https://docs.cloud.google.com/sdk/gcloud/reference/dataflow/snapshots/create"
-    - title: "既存のパイプラインを更新する"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/updating-a-pipeline"
 
 - id: maintain-ops-014
   domain: maintain
@@ -542,7 +560,7 @@
     10時以降のメッセージを再処理するには、どうすればよいですか？
   choices:
     a: "サブスクリプションのスナップショットを今すぐ作成し、作成したスナップショットにサブスクリプションをシークする"
-    b: "サブスクリプションを本日10時の時刻にシークし、10時以降に公開されたメッセージを未確認の状態に戻す"
+    b: "サブスクリプションを本日10時の時刻にシークし、10時以降に公開されたメッセージを未確認の状態に戻して再配信させる"
     c: "同じトピックに新しいサブスクリプションを作成し、修正したサブスクライバーで新しいサブスクリプションから受信する"
     d: "サブスクリプションにデッドレター トピックを設定し、10時以降のメッセージをデッドレター トピックから再処理する"
   answer: [b]
@@ -579,7 +597,7 @@
   choices:
     a: "大阪のフェイルオーバー予約でソフト フェイルオーバーを実行し、未反映の書き込みが大阪に届くのを待つ"
     b: "東京で作成しておいたテーブル スナップショットから、大阪のデータセットにテーブルを復元する"
-    c: "大阪のフェイルオーバー予約でハード フェイルオーバーを実行し、大阪をプライマリに切り替える"
+    c: "大阪のフェイルオーバー予約でハード フェイルオーバーを実行し、大阪の予約とデータセットをプライマリに切り替える"
     d: "大阪に新しいデータセットを作成し、BigQuery Data Transfer Service で東京のデータセットをコピーする"
   answer: [c]
   choiceNotes:
@@ -590,7 +608,7 @@
   explanation: |
     **マネージド障害復旧**（managed disaster recovery）は、BigQuery の Enterprise Plus エディションの機能で、コンピューティング容量（予約）とデータをまとめて別のリージョンに切り替えます。
 
-    - **フェイルオーバー予約**：プライマリとセカンダリのリージョンを持つ予約です。予約に関連付けたデータセットは、フェイルオーバーのときに予約と一緒に切り替わります。
+    - **フェイルオーバー予約**：プライマリとセカンダリのリージョンを持つ予約です。予約に関連付けたデータセットは、レプリカを個別に昇格するのではなく、予約のフェイルオーバーで予約と一緒に切り替わります。
     - **クロスリージョン データセット レプリケーション**：データセットをセカンダリのリージョンに非同期でレプリケーションします。セカンダリのレプリカは読み取り専用です。
 
     | フェイルオーバーの種類 | 動き | 使う場面 |
@@ -599,7 +617,8 @@
     | ハード フェイルオーバー | レプリケーションを待たずにすぐ切り替える。直近の書き込みが失われる可能性がある | プライマリのリージョンの障害 |
 
     - フェイルオーバーは、セカンダリのリージョンにある予約に対して実行します。
-    - レプリケーションは非同期のため、RPO はゼロにはなりません。予約のレプリケーションの状態から、最後にレプリケーションが完了した時刻を確認できます。
+    - レプリケーションは非同期のため、RPO はゼロにはなりません。
+    - テーブル スナップショットはベーステーブルと同じリージョンに作成されるため、リージョン全体の障害への備えにはなりません。
   diagram: |
     flowchart TD
       subgraph TKY["東京（プライマリ）"]
@@ -614,8 +633,10 @@
       OP["運用チーム"] -->|ハード フェイルオーバー| R2
       R2 --> P["大阪がプライマリになり<br/>更新と分析を再開"]
   references:
-    - title: "予約の概要"
-      url: "https://docs.cloud.google.com/bigquery/docs/reservations-intro"
+    - title: "マネージド障害復旧"
+      url: "https://docs.cloud.google.com/bigquery/docs/managed-disaster-recovery"
+    - title: "クロスリージョン データセット レプリケーション"
+      url: "https://docs.cloud.google.com/bigquery/docs/data-replication"
 
 - id: maintain-ops-016
   domain: maintain
@@ -632,7 +653,7 @@
   choices:
     a: "Cloud SQL の高可用性構成で手動フェイルオーバーを実行し、スタンバイのインスタンスに切り替える"
     b: "Spanner のインスタンス構成を大阪のリージョン構成に変更し、データを大阪に移す"
-    c: "Cloud SQL の大阪のリードレプリカを昇格してスタンドアロンのインスタンスにし、アプリケーションの接続先を切り替える"
+    c: "Cloud SQL の大阪のリードレプリカを昇格し、アプリケーションの接続先を切り替える"
     d: "Bigtable のバックアップから大阪に新しいインスタンスを作成し、アプリケーションの接続先を切り替える"
     e: "Bigtable のアプリ プロファイルを変更し、要求を大阪のクラスタに送るようにする"
   answer: [c, e]
@@ -665,8 +686,8 @@
       S2 -->|手動| A2["アプリ プロファイルを<br/>大阪のクラスタに変更"]
       S3 -->|自動| A3["大阪で処理を継続<br/>操作は不要"]
   references:
-    - title: "高可用性構成について"
-      url: "https://docs.cloud.google.com/sql/docs/mysql/high-availability"
+    - title: "リージョンの移行や障害復旧のためにレプリカを昇格する"
+      url: "https://docs.cloud.google.com/sql/docs/mysql/replication/cross-region-replicas"
     - title: "アプリ プロファイルの概要"
       url: "https://docs.cloud.google.com/bigtable/docs/app-profiles"
     - title: "Spanner のレプリケーション"
@@ -691,7 +712,7 @@
     e: "毎月末に CREATE TABLE ... COPY でテーブルのコピーを作成し、1年後に削除する"
   answer: [b, d]
   choiceNotes:
-    a: "フェイルセーフは、タイムトラベル期間を過ぎたデータを緊急時に復元するための仕組みです。昨日の変更はタイムトラベルで自分で参照できるため、依頼する必要はありません。"
+    a: "フェイルセーフは、タイムトラベル期間を過ぎた削除済みのデータを、緊急時にテーブル単位で復元するための仕組みです。昨日の変更はタイムトラベルで自分で参照できるため、依頼する必要はありません。"
     b: "正解です。タイムトラベル期間（ここでは7日間）内であれば、FOR SYSTEM_TIME AS OF で過去の時点のデータを参照できます。取り出した値で元のテーブルを修正します。"
     c: "タイムトラベル期間は最長7日間で、365日には延ばせません。"
     d: "正解です。テーブル スナップショットは読み取り専用で、ベーステーブルとの差分だけが保存料金の対象になります。有効期限を設定すれば、1年後に自動で削除されます。"
@@ -702,7 +723,7 @@
     | 機能 | 期間 | 復元の方法 | 用途 |
     | --- | --- | --- | --- |
     | タイムトラベル | 2〜7日（データセットごとに設定、既定は7日） | `FOR SYSTEM_TIME AS OF` で参照する。削除したテーブルはコピーで復元する | 直近の誤操作からの復旧 |
-    | フェイルセーフ | タイムトラベル期間の後の7日 | Cloud カスタマーケアに依頼する | 緊急時の最後の手段 |
+    | フェイルセーフ | タイムトラベル期間の後の7日 | Cloud カスタマーケアに依頼する（テーブル単位） | 削除したテーブルなどの緊急時の復旧 |
     | テーブル スナップショット | 任意（有効期限を設定できる） | スナップショットからテーブルを作成する | 特定の時点の長期保持 |
 
     ```sql
@@ -738,7 +759,7 @@
     a: "バケットのオブジェクトのバージョニングを有効にし、`raw/2026/` 以下の最新でないバージョンを最新のバージョンに戻す"
     b: "Cloud カスタマーケアに連絡し、削除されたオブジェクトを Google が保持するバックアップから復元してもらう"
     c: "バケットに保持ポリシーを設定してロックし、`raw/2026/` 以下のオブジェクトがこれ以上削除されないようにする"
-    d: "gcloud storage restore コマンドで、`raw/2026/` 以下の削除（復元可能）状態のオブジェクトを一括で復元する"
+    d: "gcloud storage restore コマンドで、`raw/2026/` 以下の削除されたオブジェクトを一括で復元する"
   answer: [d]
   choiceNotes:
     a: "バージョニングは、有効にした後に上書き・削除されたオブジェクトだけを最新でないバージョンとして残します。3日前に削除されたオブジェクトは対象になりません。"
@@ -776,8 +797,8 @@
 
     どうすればよいですか？
   choices:
-    a: "ポイントインタイム リカバリで14時31分の時点を指定し、インスタンスを新しいインスタンスにクローンする"
-    b: "昨夜取得された自動バックアップを現在のインスタンスに復元し、削除前のデータを取り戻す"
+    a: "ポイントインタイム リカバリで14時31分を指定し、インスタンスのクローンを作成する"
+    b: "昨夜の自動バックアップを現在のインスタンスに復元し、削除前のデータを取り戻す"
     c: "高可用性構成の手動フェイルオーバーを実行し、スタンバイだったインスタンスからデータを取り出す"
     d: "リードレプリカを昇格してスタンドアロンのインスタンスにし、そこから削除前のデータを取り出す"
   answer: [a]
@@ -805,8 +826,8 @@
     - 時刻は UTC で指定します（例の 05:31 UTC は日本時間の14時31分）。
     - バックアップをインスタンスに復元すると、復元先のインスタンスのデータは上書きされます。
   references:
-    - title: "インスタンスのクローンを作成する"
-      url: "https://docs.cloud.google.com/sql/docs/postgres/clone-instance"
+    - title: "ポイントインタイム リカバリ（PITR）を実行する"
+      url: "https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/pitr"
     - title: "gcloud sql instances clone"
       url: "https://docs.cloud.google.com/sdk/gcloud/reference/sql/instances/clone"
 
@@ -820,13 +841,13 @@
     どうすればよいですか？
   choices:
     a: "gcloud redis instances failover コマンドを、データ保護モードに force-data-loss を指定して実行する"
-    b: "gcloud redis instances failover コマンドを、既定のデータ保護モード（limited-data-loss）で実行する"
+    b: "gcloud redis instances failover コマンドを、既定のデータ保護モードで実行する"
     c: "インスタンスを削除して同じ名前で作成し直し、アプリケーションが新しいインスタンスに再接続することを確認する"
     d: "データを RDB ファイルとして Cloud Storage にエクスポートし、別のインスタンスにインポートしてから接続先を切り替える"
   answer: [b]
   choiceNotes:
     a: "このモードはデータの損失を防ぐ確認をせずにフェイルオーバーするため、大量のデータが失われる可能性があります。データの損失を抑えるという要件に反します。"
-    b: "正解です。Standard Tier では、手動フェイルオーバーでプライマリとレプリカを入れ替え、障害時と同じ切り替えを試せます。既定のモードは、データの損失がシステムで定めた範囲内に収まるように保護しながらフェイルオーバーします。"
+    b: "正解です。Standard Tier では、手動フェイルオーバーでプライマリとレプリカを入れ替え、障害時と同じ切り替えを試せます。既定のモード（limited-data-loss）は、レプリカとの差がシステムで定めた範囲を超えている場合はフェイルオーバーを中止し、データの損失を抑えます。"
     c: "インスタンスを作り直すとデータがすべて失われます。また、フェイルオーバーとは異なる動きのため、障害時の切り替えの確認になりません。"
     d: "エクスポートとインポートは、データの移行やバックアップのための操作です。フェイルオーバーの動きの確認にはなりません。"
   explanation: |
@@ -836,25 +857,25 @@
     | --- | --- | --- |
     | Basic Tier | 単一のノード | レプリカがないため、障害時はデータが失われ、復旧するまで使えない |
     | Standard Tier | プライマリと、別のゾーンのレプリカ | プライマリの障害時に、レプリカへ自動でフェイルオーバーする |
-    | Memorystore for Redis Cluster | 複数のシャード（各シャードにプライマリとレプリカ） | シャードごとにレプリカへ自動でフェイルオーバーする。シャードを増やして容量と処理量を拡張できる |
+    | Memorystore for Redis Cluster | 複数のシャード（各シャードにプライマリと、必要な数のレプリカ） | レプリカを持つシャードは、レプリカへ自動でフェイルオーバーする。シャードを増やして容量と処理量を拡張できる |
 
     - Standard Tier では、リードレプリカを追加して読み取りの負荷を分散することもできます。
     - フェイルオーバー中は短時間接続が切れるため、クライアントは再接続と再試行をするように作っておきます。手動フェイルオーバーは、その動作を本番の前に確認するのに役立ちます。
-    - Redis Cluster のノードは、既定でリージョン内の複数のゾーンに分散して配置されます。
+    - レプリカを持つ Redis Cluster では、シャードのプライマリとレプリカが複数のゾーンに分散して配置され、ゾーンの障害に備えられます。
   references:
-    - title: "Memorystore for Redis の概要"
-      url: "https://docs.cloud.google.com/memorystore/docs/redis"
+    - title: "手動フェイルオーバーについて"
+      url: "https://docs.cloud.google.com/memorystore/docs/redis/about-manual-failover"
+    - title: "手動フェイルオーバーを開始する"
+      url: "https://docs.cloud.google.com/memorystore/docs/redis/initiate-manual-failover"
     - title: "Memorystore for Redis Cluster の概要"
-      url: "https://docs.cloud.google.com/memorystore/docs/cluster"
-    - title: "gcloud redis instances failover"
-      url: "https://docs.cloud.google.com/sdk/gcloud/reference/redis/instances/failover"
+      url: "https://docs.cloud.google.com/memorystore/docs/cluster/memorystore-for-redis-cluster-overview"
 
 - id: maintain-ops-021
   domain: maintain
   services: [composer, cloud-storage, migration, cloud-sql]
   type: single
   question: |
-    ある物流企業は、東京（asia-northeast1）の Cloud Composer 2 の環境で、数百の DAG を使って配送データのパイプラインを管理しています。東京リージョン全体が使えなくなった場合でも、数時間以内に大阪（asia-northeast2）でワークフローの実行を再開したいと考えています。再開後も、DAG の実行履歴、Airflow の変数と接続、環境に追加した PyPI パッケージを引き継ぐ必要があります。運用の手間はできるだけ抑えたいと考えています。
+    ある物流企業は、東京（asia-northeast1）の Cloud Composer 3 の環境で、数百の DAG を使って配送データのパイプラインを管理しています。東京リージョン全体が使えなくなった場合でも、数時間以内に大阪（asia-northeast2）でワークフローの実行を再開したいと考えています。再開後も、DAG の実行履歴、Airflow の変数と接続、環境に追加した PyPI パッケージを引き継ぐ必要があります。運用の手間はできるだけ抑えたいと考えています。
 
     どのように準備すべきですか？
   choices:
@@ -866,8 +887,8 @@
   choiceNotes:
     a: "DAG のファイルは引き継げますが、Airflow データベースにある実行履歴、変数、接続や、PyPI パッケージの設定は引き継げません。"
     b: "高い復元性のモードは、同じリージョン内のゾーンの障害に備える構成です。リージョン全体の障害には対応できません。"
-    c: "正解です。環境のスナップショットには、Airflow データベース（DAG の実行履歴、変数、接続など）、環境の設定（PyPI パッケージ、環境変数など）、環境のバケットの DAG やプラグインが含まれます。別のリージョンの環境に読み込めば、まとめて引き継げます。"
-    d: "Airflow データベースは Cloud Composer が管理しており、利用者がレプリカを追加することはできません。"
+    c: "正解です。環境のスナップショットには、Airflow データベースのバックアップ（DAG の実行履歴、変数、接続など）、環境の設定（PyPI パッケージ、環境変数など）、環境のバケットの DAG やプラグインが含まれます。別のリージョンの環境に読み込めば、まとめて引き継げます。"
+    d: "Airflow データベースは Cloud Composer が管理するテナント プロジェクトにあり、利用者がレプリカを追加することはできません。"
   explanation: |
     Cloud Composer の環境の障害復旧には、**環境のスナップショット** を使います。
 
@@ -883,21 +904,24 @@
 
     | スナップショットに含まれるもの | 例 |
     | --- | --- |
-    | Airflow データベース | DAG の実行履歴、変数、接続 |
+    | Airflow データベースのバックアップ | DAG の実行履歴、タスクの状態、変数、接続 |
     | 環境の設定 | PyPI パッケージ、環境変数、Airflow の構成のオーバーライド |
     | 環境のバケットのデータ | DAG、プラグイン、データ フォルダ |
 
-    - 環境の作成には時間がかかるため、RTO が短い場合は大阪の環境をあらかじめ作成しておきます。
+    - 復旧用の環境をあらかじめ作成しておく方法（ウォーム DR）は、環境の作成を待たないため早く復旧できます。障害が起きてから作成する方法（コールド DR）は、待機中の環境の費用がかかりません。
     - スナップショットを取得する間隔が、失われる可能性のある実行履歴の範囲（RPO）になります。
+    - 環境のサイズやネットワークの構成はスナップショットから読み込まれないため、大阪の環境で設定しておきます。
+
+    なお、Cloud Composer は2026年4月に Managed Service for Apache Airflow へ名称が変わりました（Cloud Composer 3 は Managed Airflow (Gen 3)）。試験ガイドでは Cloud Composer の名称が使われています。
   diagram: |
     flowchart TD
       E1["東京の Composer 環境"] -->|定期的に保存| S["スナップショット<br/>東京以外のバケット"]
       S -->|障害時に読み込み| E2["大阪の Composer 環境"]
       E2 --> R["ワークフローの実行を再開"]
   references:
-    - title: "gcloud composer environments snapshots save"
-      url: "https://docs.cloud.google.com/sdk/gcloud/reference/composer/environments/snapshots/save"
+    - title: "環境のスナップショットを使用した障害復旧"
+      url: "https://docs.cloud.google.com/composer/docs/composer-3/disaster-recovery-with-snapshots"
+    - title: "環境のスナップショットを保存して読み込む"
+      url: "https://docs.cloud.google.com/composer/docs/composer-3/save-load-snapshots"
     - title: "gcloud composer environments snapshots load"
       url: "https://docs.cloud.google.com/sdk/gcloud/reference/composer/environments/snapshots/load"
-    - title: "Cloud Composer のドキュメント"
-      url: "https://docs.cloud.google.com/composer/docs"
