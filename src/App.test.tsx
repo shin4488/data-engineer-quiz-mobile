@@ -46,6 +46,25 @@ describe('練習モード', () => {
     expect(screen.getByRole('button', { name: '間違えた1問をもう一度解く' })).toBeTruthy();
   });
 
+  it('前の問題に戻ると、回答済みの結果と解説をもう一度見られる', () => {
+    render(<App />);
+    click('練習を始める');
+    expect(screen.getByRole('button', { name: '前へ' })).toHaveProperty('disabled', true);
+
+    answer(true);
+    click('次の問題');
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+
+    click('前へ');
+    expect(screen.getByText('1 / 3')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('正解');
+    expect(screen.getByRole('region', { name: '解説' })).toBeTruthy();
+
+    click('次の問題');
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '回答する' })).toBeTruthy();
+  });
+
   it('間違えた回数と見直しの印で、次の出題を絞り込める', () => {
     render(<App />);
     click('練習を始める');

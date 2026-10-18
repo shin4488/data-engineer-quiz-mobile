@@ -144,11 +144,19 @@ function PracticeBody({
           <Explanation question={question} stat={progress.stats[questionId]} />
         </>
       )}
-      <div className="action-bar">
+      <div className="action-bar row">
+        <button
+          type="button"
+          className="button"
+          disabled={session.index === 0}
+          onClick={() => onMove(session.index - 1)}
+        >
+          前へ
+        </button>
         {answered ? (
           <button
             type="button"
-            className="button primary block"
+            className="button primary grow"
             onClick={() => (isLast ? onFinish() : onMove(session.index + 1))}
           >
             {isLast ? '結果を見る' : '次の問題'}
@@ -156,7 +164,7 @@ function PracticeBody({
         ) : (
           <button
             type="button"
-            className="button primary block"
+            className="button primary grow"
             disabled={!ready}
             onClick={() => onSubmitPractice(questionId, selected)}
           >
