@@ -1,0 +1,1022 @@
+- id: design-security-001
+  domain: design
+  services: [bigquery, iam]
+  type: multiple
+  question: |
+    ある小売企業は、分析用プロジェクトに `sales`、`hr`、`finance` の3つの BigQuery データセットを置いています。マーケティング部のアナリスト（Google グループ `marketing-analysts` で管理）には `sales` データセットのテーブルに対するクエリだけを許可し、`hr` と `finance` のデータは参照させてはいけません。アナリストは、この分析用プロジェクトでクエリジョブを実行します。
+
+    最小権限の原則に従って要件を満たすには、どの設定を組み合わせるべきですか？
+  choices:
+    a: "分析用プロジェクトに対して、`marketing-analysts` グループに `roles/bigquery.dataViewer` を付与する"
+    b: "`sales` データセットに対して、`marketing-analysts` グループに `roles/bigquery.dataViewer` を付与する"
+    c: "分析用プロジェクトに対して、`marketing-analysts` グループに `roles/bigquery.user` を付与する"
+    d: "分析用プロジェクトに対して、`marketing-analysts` グループに `roles/bigquery.jobUser` を付与する"
+    e: "`sales` データセットに対して、`marketing-analysts` グループに `roles/bigquery.dataEditor` を付与する"
+  answer: [b, d]
+  choiceNotes:
+    a: "プロジェクト単位で付与すると、プロジェクト内のすべてのデータセットを読み取れるようになり、`hr` と `finance` も参照できてしまいます。"
+    b: "正解です。データセット単位で `roles/bigquery.dataViewer` を付与すると、そのデータセットのテーブルとビューだけを読み取れます。`hr` と `finance` には権限が及びません。"
+    c: "`roles/bigquery.user` は、ジョブの実行に加えてデータセットの作成なども許可します。クエリの実行が目的なら `roles/bigquery.jobUser` のほうが権限を絞れます。"
+    d: "正解です。クエリはジョブとして実行されるため、プロジェクトでジョブを作成する権限が必要です。`roles/bigquery.jobUser` はジョブの実行だけを許可し、データを読む権限は含みません。"
+    e: "`roles/bigquery.dataEditor` には、テーブルの作成・更新・削除の権限が含まれます。クエリだけを行うアナリストには過剰です。"
+  explanation: |
+    BigQuery でクエリを実行するには、**データを読む権限** と **ジョブを実行する権限** の2つが必要です。それぞれを付与する範囲を分けて考えるのがポイントです。
+
+    | 権限の種類 | ロール | 付与する範囲 |
+    | --- | --- | --- |
+    | データの読み取り | `roles/bigquery.dataViewer` | 必要なデータセット（またはテーブル） |
+    | ジョブの実行 | `roles/bigquery.jobUser` | クエリを実行するプロジェクト |
+
+    - ジョブの権限は「データがあるプロジェクト」ではなく「クエリを実行するプロジェクト」に必要です。
+    - プロジェクト単位で `dataViewer` を付与すると、後から追加されたデータセットまで見えてしまいます。機密度の異なるデータは、データセット単位で権限を分けるのが基本です。
+    - ロールは個人ではなく Google グループに付与すると、異動や退職のときの管理が楽になります。
+  references:
+    - title: "IAM でリソースへのアクセスを制御する"
+      url: "https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam"
+    - title: "クエリを実行する"
+      url: "https://docs.cloud.google.com/bigquery/docs/running-queries"
+
+- id: design-security-002
+  domain: design
+  services: [dataflow, iam, pubsub, bigquery]
+  type: single
+  question: |
+    ある物流企業は、配送車両の位置情報を Pub/Sub のサブスクリプションから読み取り、BigQuery の `fleet` データセットに書き込む Dataflow のストリーミングパイプラインを運用しています。ジョブはワーカーのサービスアカウントを指定せずに起動しているため、プロジェクトの編集者ロールを持つ Compute Engine のデフォルトのサービスアカウントで動作しています。セキュリティ監査で、この構成は権限が広すぎると指摘されました。
+
+    最小権限の原則に従ってワーカーの権限を見直すには、どうすればよいですか？
+  choices:
+    a: "Compute Engine のデフォルトのサービスアカウントから編集者ロールを外して `roles/dataflow.admin` を付与し、引き続きワーカーのサービスアカウントとして使用する"
+    b: "Dataflow サービスエージェントに Pub/Sub と BigQuery のロールを付与し、ワーカーがサービスエージェントの権限でサブスクリプションとデータセットにアクセスするようにする"
+    c: "パイプライン専用のサービスアカウントを作成して `roles/dataflow.worker` と、対象のサブスクリプションとデータセットに限定したロールを付与し、ワーカーのサービスアカウントに指定する"
+    d: "ジョブを起動するデータエンジニアに Pub/Sub と BigQuery のロールを付与し、ワーカーがジョブを起動したユーザーの認証情報でデータにアクセスするようにする"
+  answer: [c]
+  choiceNotes:
+    a: "デフォルトのサービスアカウントはプロジェクト内の他の VM でも使われることが多く、パイプライン専用の権限に絞れません。`roles/dataflow.admin` も、ワーカーの実行には不要な管理権限です。"
+    b: "Dataflow サービスエージェントは、Google がワーカーの VM などのリソースを管理するために使うアカウントです。パイプラインのデータへのアクセスは、ワーカーのサービスアカウントの権限で行われます。"
+    c: "正解です。ワーカーは指定したサービスアカウントの権限で動作します。専用のアカウントに `roles/dataflow.worker` と、サブスクリプションへの `roles/pubsub.subscriber`、データセットへの `roles/bigquery.dataEditor` のような対象を絞ったロールだけを付与すれば、最小権限になります。"
+    d: "ワーカーは、ジョブを起動したユーザーの認証情報では動作しません。ワーカーの VM は、ワーカーのサービスアカウントの権限でリソースにアクセスします。"
+  explanation: |
+    Dataflow には、役割の異なる3種類のアカウントが関わります。
+
+    | アカウント | 役割 | 必要な権限の例 |
+    | --- | --- | --- |
+    | ジョブを起動するユーザー・CI/CD | ジョブの作成と管理 | Dataflow のジョブを作成するロール、ワーカーのサービスアカウントに対する `roles/iam.serviceAccountUser` |
+    | Dataflow サービスエージェント | Google がワーカーの VM などを管理 | 自動で付与される |
+    | ワーカーのサービスアカウント | ワーカーがデータを読み書き | `roles/dataflow.worker` と、各リソースへのロール |
+
+    - ワーカーのサービスアカウントは、Java では `--serviceAccount`、Python では `--service_account_email` で指定します。
+    - パイプラインごとに専用のサービスアカウントを用意すると、権限を絞れるだけでなく、監査ログでどのパイプラインがアクセスしたかを追跡しやすくなります。
+    - デフォルトのサービスアカウントに編集者ロールが自動で付与されないよう、組織ポリシー `iam.automaticIamGrantsForDefaultServiceAccounts` を適用することも推奨されています。
+  references:
+    - title: "Dataflow のセキュリティと権限"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/security-and-permissions"
+    - title: "Dataflow のロールと権限"
+      url: "https://docs.cloud.google.com/iam/docs/roles-permissions/dataflow"
+
+- id: design-security-003
+  domain: design
+  services: [iam, bigquery]
+  type: single
+  question: |
+    ある製造企業の品質管理チームは、専用の Google Cloud プロジェクトで BigQuery を使い、検査データのテーブルを作成・更新しながら分析しています。現在、チームには `roles/bigquery.dataEditor` を付与しています。監査部門から「品質記録のテーブルを、チームのメンバーが誤って、または意図的に削除できない状態にすること」を求められました。テーブルの作成、スキーマの更新、データの読み書きは引き続き必要です。
+
+    削除を確実に防ぎつつ必要な作業を続けられるようにするには、どうすればよいですか？
+  choices:
+    a: "`roles/bigquery.dataEditor` を付与したまま、タイムトラベル期間を最大の7日間に設定し、削除されたテーブルを復元できるようにする"
+    b: "`roles/bigquery.dataEditor` の権限から `bigquery.tables.delete` だけを除いたカスタムロールを作成し、チームに付与する"
+    c: "`roles/bigquery.dataEditor` を付与したまま、テーブルの削除を検知する Cloud Monitoring のアラートを設定し、削除されたらチームに通知する"
+    d: "`roles/bigquery.dataViewer` と `roles/bigquery.jobUser` だけを付与し、テーブルの作成と更新はプロジェクトの管理者に依頼する運用にする"
+  answer: [b]
+  choiceNotes:
+    a: "タイムトラベルで復元できるのは期間内に限られ、削除そのものは防げません。「削除できない状態にする」という要件を満たしません。"
+    b: "正解です。事前定義ロールに必要な権限と不要な権限が混在している場合は、必要な権限だけを集めたカスタムロールを作成します。`bigquery.tables.delete` を含めなければ、テーブルは削除できません。"
+    c: "アラートは削除を事後に検知するだけで、削除そのものは防げません。"
+    d: "削除は防げますが、チームが必要とするテーブルの作成と更新ができなくなります。"
+  explanation: |
+    最小権限を実現する基本は **事前定義ロール** ですが、要件に合うロールがない場合は **カスタムロール** を使います。
+
+    | 種類 | 特徴 |
+    | --- | --- |
+    | 基本ロール（オーナー、編集者、閲覧者） | 範囲が広すぎるため、本番環境では避ける |
+    | 事前定義ロール | Google がサービスごとに用意し、権限の追加なども Google が保守する |
+    | カスタムロール | 必要な権限だけを選んで組織またはプロジェクトで定義する。保守は利用者の責任 |
+
+    - カスタムロールは、事前定義ロールの権限一覧をもとに不要な権限を除いて作ると効率的です。
+    - 権限の中にはカスタムロールで使えないものもあるため、作成時に確認します。
+    - 事前定義ロールで足りる場合は、保守の手間がかからない事前定義ロールを優先します。
+  references:
+    - title: "カスタムロールについて"
+      url: "https://docs.cloud.google.com/iam/docs/understanding-custom-roles"
+    - title: "IAM でリソースへのアクセスを制御する"
+      url: "https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam"
+
+- id: design-security-004
+  domain: design
+  services: [iam, bigquery]
+  type: single
+  question: |
+    ある大手旅行会社は、外部の監査法人による年次監査を受けています。監査人のグループには、監査期間中だけ BigQuery の `audit_evidence` データセットの読み取りを許可する必要があります。昨年は監査の終了後に権限の削除を忘れ、数か月にわたってアクセスできる状態が続いていました。
+
+    運用の手間を最小限に抑えて、監査期間の終了後にアクセスが確実に無効になるようにするには、どうすればよいですか？
+  choices:
+    a: "監査人用のサービスアカウントを作成してキーを監査法人に渡し、監査期間の終了日にキーを削除する作業を運用手順書と監査のチェックリストに追加する"
+    b: "Cloud Scheduler と Cloud Run functions で、監査期間の終了日にロールバインディングを削除する処理を作成して定期的に動かす"
+    c: "`audit_evidence` データセットのデフォルトのテーブル有効期限を監査期間の終了日に合わせ、期限を過ぎたテーブルが自動で削除されるようにする"
+    d: "`request.time` で期限を付けた条件付きのロールバインディングで、`roles/bigquery.dataViewer` を付与する"
+  answer: [d]
+  choiceNotes:
+    a: "サービスアカウントキーは漏えいのリスクがあり、外部への配布は推奨されません。削除を手順書に頼る点も、削除忘れという課題の解決になりません。"
+    b: "期限後に権限を外すことはできますが、スケジューラと関数を作成・保守する必要があり、IAM Conditions に比べて運用の手間が増えます。"
+    c: "監査に必要なテーブルそのものが削除されてしまいます。アクセス権ではなくデータを消す方法で、要件に合いません。"
+    d: "正解です。IAM Conditions の日時の条件を使うと、指定した日時を過ぎたロールバインディングは自動的に効力を失います。追加の仕組みや手作業は必要ありません。"
+  explanation: |
+    **IAM Conditions** を使うと、ロールバインディングに条件を付けて、条件を満たすときだけロールを有効にできます。
+
+    | 条件に使える主な属性 | 例 |
+    | --- | --- |
+    | 日時 | `request.time < timestamp("2027-03-31T23:59:59Z")` で期限付きのアクセスにする |
+    | リソースの名前・種類 | 特定の名前で始まるリソースだけに権限を限定する |
+    | タグ | 特定のタグが付いたリソースだけに権限を限定する |
+
+    - 期限を過ぎた条件付きバインディングは IAM ポリシーに残りますが、アクセスは許可されません。
+    - 一時的なアクセス（監査人、外部委託先、障害対応など）には、期限付きの条件を付けるのが定石です。
+    - 監査人がクエリを実行するプロジェクトで付与する `roles/bigquery.jobUser` にも、同じように期限を付けられます。
+  references:
+    - title: "IAM Conditions でアクセスを制御する"
+      url: "https://docs.cloud.google.com/bigquery/docs/conditions"
+    - title: "IAM Conditions の概要"
+      url: "https://docs.cloud.google.com/iam/docs/conditions-overview"
+
+- id: design-security-005
+  domain: design
+  services: [iam, bigquery, cloud-storage]
+  type: single
+  question: |
+    あるメディア企業では、各部署が BigQuery のデータセットや Cloud Storage のバケットを自由に作成しています。最近、社員が個人の Gmail アカウントにデータセットの閲覧権限を付与していたことが発覚しました。セキュリティチームは、組織内のすべてのプロジェクトで、自社のドメイン以外のアカウントに IAM のロールが付与されること自体を防ぎたいと考えています。
+
+    この要件を満たすには、どうすればよいですか？
+  choices:
+    a: "組織ポリシーの「ドメインで制限された共有」を組織に適用し、自社の Cloud Identity（Google Workspace）の顧客 ID だけを許可する"
+    b: "組織内のすべてのプロジェクトを VPC Service Controls のサービス境界に含め、BigQuery と Cloud Storage を制限対象のサービスにする"
+    c: "Cloud Asset Inventory で IAM ポリシーを毎日エクスポートして分析し、外部のアカウントへの付与を見つけたら削除する"
+    d: "すべての Cloud Storage バケットで均一なバケットレベルのアクセスを有効にして、ACL による共有を無効にする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ドメインで制限された共有を適用すると、許可した顧客 ID に属さないアカウントを IAM ポリシーに追加できなくなります。組織に設定すれば、配下のすべてのプロジェクトに継承されます。"
+    b: "VPC Service Controls は、境界の外からの API アクセスやデータの持ち出しを防ぐ仕組みです。外部のアカウントへのロールの付与そのものは防げません。"
+    c: "付与された後に見つけて削除する事後の対策です。削除するまでの間は、外部のアカウントからアクセスできてしまいます。"
+    d: "ACL による共有は防げますが、IAM による外部アカウントへの付与は防げません。BigQuery のデータセットにも効果がありません。"
+  explanation: |
+    **ドメインで制限された共有** は、IAM ポリシーに追加できるアカウントを、許可した組織（Cloud Identity または Google Workspace の顧客 ID）に属するものに限定する組織ポリシーです。従来から使われている制約の名前は `iam.allowedPolicyMemberDomains` です。
+
+    - 組織やフォルダに設定すると、配下のプロジェクトとリソースに継承されます。
+    - `allUsers` や `allAuthenticatedUsers` による一般公開も防げます。
+    - 組織ポリシーは設定後の操作に適用され、既存のロールバインディングは自動では削除されません。導入時に既存の付与を棚卸しします。
+    - 取引先との共有が必要な場合は、その組織の顧客 ID を許可リストに加えるか、特定のプロジェクトだけポリシーを上書きします。
+
+    | 対策の種類 | 例 |
+    | --- | --- |
+    | 予防的（起こらないようにする） | 組織ポリシー、IAM、VPC Service Controls |
+    | 発見的（起きたことを見つける） | Cloud Asset Inventory、Cloud Audit Logs、Security Command Center |
+
+    「付与されること自体を防ぐ」という要件には、予防的な対策が必要です。
+  references:
+    - title: "ドメインによる ID の制限"
+      url: "https://docs.cloud.google.com/resource-manager/docs/organization-policy/restricting-domains"
+
+- id: design-security-006
+  domain: design
+  services: [bigquery, kms, iam]
+  type: single
+  question: |
+    ある保険会社は、契約者の個人情報を格納する BigQuery データセット `policyholders` を新設します。社内規程により、このデータセットのすべてのテーブルを自社で管理する暗号鍵で保護し、鍵は鍵管理専用のプロジェクトで一元管理しなければなりません。データエンジニアがテーブルを作成するたびに鍵の指定を忘れるリスクも避けたいと考えています。
+
+    どのように構成すべきですか？
+  choices:
+    a: "AEAD 関数用の鍵セットを Cloud KMS の鍵でラップして鍵管理プロジェクトに保存し、すべての列を `AEAD.ENCRYPT` で暗号化してから書き込む"
+    b: "鍵管理プロジェクトの Cloud KMS で鍵を作成し、データエンジニアにその鍵の暗号化と復号のロールを付与して、テーブルの作成時に毎回鍵を指定させる"
+    c: "鍵管理プロジェクトの Cloud KMS で鍵を作成し、BigQuery のサービスアカウントにその鍵の暗号化と復号のロールを付与して、データセットのデフォルトの鍵に設定する"
+    d: "顧客指定の暗号鍵（CSEK）を生成して鍵管理プロジェクトの Secret Manager に保存し、BigQuery の読み込みジョブごとにその鍵を指定する"
+  answer: [c]
+  choiceNotes:
+    a: "列単位の暗号化はできますが、すべての書き込みとクエリで暗号化・復号の処理が必要になり、開発と運用の負担が大きくなります。暗号化の書き忘れも防げません。保存データを自社の鍵で保護するという要件には CMEK で対応します。"
+    b: "BigQuery で暗号化と復号を行うのは、ユーザーではなく BigQuery のサービスアカウントです。テーブルごとに鍵を指定させる方法では、指定を忘れるリスクも残ります。"
+    c: "正解です。データセットにデフォルトの鍵を設定すると、作成されるテーブルは自動的にその鍵（CMEK）で保護されます。暗号化と復号を行うのは BigQuery のサービスアカウントなので、このアカウントに `roles/cloudkms.cryptoKeyEncrypterDecrypter` を付与します。"
+    d: "BigQuery は顧客指定の暗号鍵（CSEK）に対応していません。CSEK は Cloud Storage や Compute Engine で使う方式です。"
+  explanation: |
+    Google Cloud のデータは、何も設定しなくても **Google が管理する鍵で保存時に暗号化** されます。鍵を自社で管理する必要がある場合に CMEK（顧客管理の暗号鍵）を使います。
+
+    | 方式 | 鍵の管理者 | 主な用途 |
+    | --- | --- | --- |
+    | Google のデフォルトの暗号化 | Google | 特別な要件がない場合 |
+    | CMEK（Cloud KMS） | 利用者（Cloud KMS で管理） | 鍵のローテーションや無効化を自社で制御したい場合 |
+    | CSEK | 利用者（リクエストごとに鍵を渡す） | Cloud Storage と Compute Engine だけで利用できる |
+
+    BigQuery で CMEK を使うときのポイントは次のとおりです。
+
+    - 鍵を使うのは BigQuery のサービスアカウント（`bq-プロジェクト番号@bigquery-encryption.iam.gserviceaccount.com`）です。
+    - 鍵のロケーションは、データセットのロケーションに合わせます。
+    - 鍵を無効化・破棄したり、サービスアカウントの権限を外したりすると、そのテーブルのデータは読めなくなります。
+    - データセットのデフォルトの鍵を設定しておけば、テーブルごとの指定は不要です。
+  diagram: |
+    flowchart TD
+      subgraph KP["鍵管理プロジェクト"]
+        KEY["Cloud KMS の鍵"]
+      end
+      subgraph DP["データプロジェクト"]
+        DS["policyholders データセット<br/>デフォルトの鍵を設定"]
+        T["新しく作成したテーブル"]
+      end
+      SA["BigQuery の<br/>サービスアカウント"]
+      KEY -.->|暗号化と復号のロール| SA
+      DS -->|CMEK を自動で適用| T
+      SA -->|鍵で暗号化・復号| T
+  references:
+    - title: "顧客管理の Cloud KMS 鍵"
+      url: "https://docs.cloud.google.com/bigquery/docs/customer-managed-encryption"
+    - title: "顧客管理の暗号鍵（CMEK）"
+      url: "https://docs.cloud.google.com/kms/docs/cmek"
+
+- id: design-security-007
+  domain: design
+  services: [kms, bigquery, cloud-storage, pubsub]
+  type: single
+  question: |
+    ある銀行は、金融当局のガイドラインに従い、本番環境用のフォルダの配下で新しく作成される BigQuery のデータセット、Cloud Storage のバケット、Pub/Sub のトピックを、すべて CMEK で保護することにしました。使用できる鍵も、セキュリティチームが管理する鍵管理専用プロジェクトの Cloud KMS の鍵に限定しなければなりません。各チームが手順を守ることに頼らず、技術的に強制したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "本番フォルダに組織ポリシーの制約 `gcp.resourceLocations` を設定し、鍵管理プロジェクトの鍵と同じリージョンにだけ BigQuery などのリソースを作成できるようにする"
+    b: "本番フォルダに、組織ポリシーの制約 `gcp.restrictNonCmekServices` と `gcp.restrictCmekCryptoKeyProjects` を設定する"
+    c: "鍵管理プロジェクトを使う Cloud KMS Autokey を本番フォルダで有効にし、作成されたリソースが CMEK で保護されているかを Cloud Asset Inventory で毎週確認する"
+    d: "Security Command Center で CMEK を使っていないリソースを検出し、検出されたリソースをセキュリティチームが手動で CMEK に移行する"
+  answer: [b]
+  choiceNotes:
+    a: "リソースを作成できるロケーションを制限する制約で、CMEK の使用を強制する機能はありません。"
+    b: "正解です。`restrictNonCmekServices` で指定したサービスでは CMEK なしのリソースを作成できなくなり、`restrictCmekCryptoKeyProjects` で使用できる鍵を特定のプロジェクトの鍵に限定できます。両方を組み合わせることで要件を満たします。"
+    c: "Autokey は CMEK 用の鍵の作成と設定を自動化しますが、それだけでは CMEK を使わないリソースの作成を防げません。週次の確認も事後の対策です。"
+    d: "作成された後に検出する事後の対策です。CMEK なしのリソースが作成されること自体は防げません。"
+  explanation: |
+    CMEK を組織として強制するには、2つの組織ポリシーの制約を組み合わせます（制約の名前の先頭には `constraints/` が付きます）。
+
+    | 制約 | 役割 |
+    | --- | --- |
+    | `constraints/gcp.restrictNonCmekServices` | 拒否リストに入れたサービス（例：`bigquery.googleapis.com`）で、CMEK なしのリソースの作成を拒否する |
+    | `constraints/gcp.restrictCmekCryptoKeyProjects` | CMEK に使える鍵を、指定したプロジェクト・フォルダ・組織の鍵に限定する |
+
+    - `restrictNonCmekServices` だけでは、許可していないプロジェクトの鍵でも CMEK として使えてしまいます。鍵の出どころまで制御するには、両方の制約が必要です。
+    - 組織ポリシーは **新しく作成するリソース** に適用されます。既存のリソースは別途確認します。
+    - CMEK を強制すると、CMEK に対応していないサービスがリソースを作成できなくなる場合があるため、適用前に影響を確認します。
+  references:
+    - title: "CMEK の組織のポリシー"
+      url: "https://docs.cloud.google.com/kms/docs/cmek-org-policy"
+
+- id: design-security-008
+  domain: design
+  services: [kms, bigquery, cloud-storage]
+  type: single
+  question: |
+    ある国際的な法律事務所は、顧客企業から預かった訴訟関連の資料と分析データを、BigQuery と Cloud Storage に保存する予定です。顧客との契約上、データの暗号化に使う鍵素材は Google Cloud の外にある自社運用の鍵管理システムに保持し、Google に渡してはいけません。また、必要になればいつでも鍵へのアクセスを取り消して、Google Cloud 上のデータを読めない状態にできなければなりません。
+
+    どの方法を選ぶべきですか？
+  choices:
+    a: "自社の鍵管理システムで生成した鍵素材を Cloud KMS にインポートし、その鍵を BigQuery と Cloud Storage の CMEK として設定する"
+    b: "保護レベルが HSM の Cloud KMS の鍵を鍵管理専用のプロジェクトに作成し、BigQuery と Cloud Storage の CMEK として設定する"
+    c: "Cloud Storage には顧客指定の暗号鍵（CSEK）をリクエストごとに渡し、BigQuery にも同じ鍵を CSEK として指定する"
+    d: "Cloud EKM で外部の鍵管理システムの鍵を参照する鍵を作成し、BigQuery と Cloud Storage の CMEK として設定する"
+  answer: [d]
+  choiceNotes:
+    a: "インポートした鍵素材は Cloud KMS、つまり Google Cloud の中に保管されます。鍵素材を Google に渡さないという要件に反します。"
+    b: "Cloud HSM の鍵は、Google が運用する HSM の中で生成・保管されます。鍵素材を Google Cloud の外に保持するという要件を満たしません。"
+    c: "CSEK はリクエストのたびに鍵を Google に渡す方式です。また、BigQuery は CSEK に対応していません。"
+    d: "正解です。Cloud EKM では、鍵素材は外部の鍵管理システムに残り、Google には渡されません。外部の鍵管理システムでアクセスを取り消すと、その鍵で保護されたデータを Google Cloud で復号できなくなります。"
+  explanation: |
+    鍵素材をどこで生成・保管するかによって、Cloud KMS の保護レベルを選びます。
+
+    | 保護レベル | 鍵素材の場所 | 主な選択理由 |
+    | --- | --- | --- |
+    | SOFTWARE | Cloud KMS（ソフトウェア） | 一般的な CMEK の要件 |
+    | HSM（Cloud HSM） | Google が運用する FIPS 140-2 レベル 3 認定の HSM | ハードウェアで鍵を保護する必要がある |
+    | EXTERNAL / EXTERNAL_VPC（Cloud EKM） | Google Cloud の外にある外部の鍵マネージャー | 鍵素材を Google に渡せない |
+
+    Cloud EKM を選ぶときは、次の注意点も押さえておきます。
+
+    - 暗号化と復号のたびに外部の鍵マネージャーと通信するため、外部システムの可用性とレイテンシの影響を受けます。
+    - 外部で鍵を失うと、Google でもデータを復元できません。
+    - Cloud EKM の鍵も、通常の Cloud KMS の鍵と同じように CMEK として各サービスに設定します。
+  references:
+    - title: "Cloud External Key Manager"
+      url: "https://docs.cloud.google.com/kms/docs/ekm"
+    - title: "保護レベル"
+      url: "https://docs.cloud.google.com/kms/docs/protection-levels"
+
+- id: design-security-009
+  domain: design
+  services: [kms, bigquery, cloud-storage]
+  type: single
+  question: |
+    あるキャッシュレス決済サービスの企業は、カード会員データを保存する BigQuery と Cloud Storage を CMEK で保護しています。監査人から、次の要件を満たすよう求められました。
+
+    - 鍵は FIPS 140-2 レベル 3 の認定を受けたハードウェアセキュリティモジュール（HSM）の中で生成・使用する
+    - 鍵を90日ごとにローテーションする
+    - 過去に暗号化したデータは引き続き読めるようにする
+
+    社内には鍵管理システムを運用する体制がなく、運用の手間を最小限に抑えたいと考えています。どうすればよいですか？
+  choices:
+    a: "保護レベルが HSM の Cloud KMS の鍵を作成し、ローテーション期間を90日にした自動ローテーションを設定する"
+    b: "保護レベルが SOFTWARE の Cloud KMS の鍵を作成し、Cloud Scheduler から90日ごとに鍵のローテーションを実行する"
+    c: "Cloud EKM で外部の HSM の鍵を参照する鍵を作成し、外部の鍵管理システム側で90日ごとにローテーションする"
+    d: "保護レベルが HSM の Cloud KMS の鍵を作成し、90日ごとに新しい鍵バージョンを作成して古い鍵バージョンを破棄する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Cloud HSM の鍵は FIPS 140-2 レベル 3 認定の HSM で保護され、HSM の運用は Google が行います。自動ローテーションを設定すると90日ごとに新しいプライマリの鍵バージョンが作られ、古い鍵バージョンは過去のデータの復号に使われ続けます。"
+    b: "SOFTWARE の鍵は HSM で保護されないため、HSM の要件を満たしません。また、Cloud KMS の自動ローテーションを使えば、スケジューラを自作する必要はありません。"
+    c: "外部の HSM と鍵管理システムを自社で運用する必要があり、運用体制がないという状況に合いません。"
+    d: "古い鍵バージョンを破棄すると、そのバージョンで暗号化したデータを復号できなくなり、過去のデータが読めなくなります。"
+  explanation: |
+    Cloud KMS の **鍵のローテーション** は、新しい鍵バージョンを作成してプライマリにする操作です。
+
+    - 新しく暗号化するデータには、プライマリの鍵バージョンが使われます。
+    - ローテーションしても既存のデータは再暗号化されず、古い鍵バージョンも無効化・破棄されません。古いデータは古い鍵バージョンで復号されます。
+    - 古い鍵バージョンを無効化・破棄するのは、その鍵バージョンで暗号化したデータが残っていないことを確認してからにします。
+    - 対称鍵では、自動ローテーションのスケジュール（ローテーション期間と次回のローテーション日時）を設定できます。
+
+    | 要件 | 選択 |
+    | --- | --- |
+    | 鍵をハードウェアで保護したい（FIPS 140-2 レベル 3） | Cloud HSM（保護レベル HSM） |
+    | 鍵素材を Google Cloud の外に置きたい | Cloud EKM |
+    | 特別な要件はないが、鍵を自社で管理したい | 保護レベル SOFTWARE の CMEK |
+
+    Cloud HSM の鍵は通常の Cloud KMS の鍵と同じ API で扱えるため、HSM を自社で運用する必要はありません。
+  references:
+    - title: "保護レベル"
+      url: "https://docs.cloud.google.com/kms/docs/protection-levels"
+    - title: "鍵のローテーション"
+      url: "https://docs.cloud.google.com/kms/docs/key-rotation"
+
+- id: design-security-010
+  domain: design
+  services: [bigquery, kms]
+  type: single
+  question: |
+    あるオンラインゲーム会社は、プレイヤーの行動ログを BigQuery の合計数百 TB のテーブル群に蓄積しています。ログにはメールアドレスや氏名などの個人情報の列が含まれ、権限のある担当者は必要なときに元の値を参照します。退会したプレイヤーからの個人データの削除依頼が毎日数千件届きますが、そのたびに巨大なテーブル群に `DELETE` 文を実行すると、時間とコストがかかりすぎることが課題になっています。
+
+    削除依頼に応じて、そのプレイヤーの個人情報を読めない状態にする方法として、最も適切なものはどれですか？
+  choices:
+    a: "個人情報の列に動的データマスキングを設定し、削除依頼を受けたプレイヤーの値がクエリ結果でマスキングされるようにデータポリシーを更新する"
+    b: "プレイヤーごとの鍵セットを作成して鍵用のテーブルに保存し、個人情報の列を AEAD 暗号化関数で暗号化しておき、削除依頼を受けたらその鍵セットを削除する"
+    c: "Sensitive Data Protection の暗号ハッシュ（CryptoHashConfig）で個人情報の列をハッシュ値に置き換えてから、テーブルに書き込むようにする"
+    d: "テーブル群を1つの CMEK で暗号化しておき、削除依頼を受けたら Cloud KMS で鍵バージョンを破棄して、そのプレイヤーのデータを読めないようにする"
+  answer: [b]
+  choiceNotes:
+    a: "動的データマスキングは、ユーザーのロールに応じてクエリ結果の見え方を変える機能です。元の値は残るため、権限のあるユーザーは引き続き参照でき、削除したことになりません。"
+    b: "正解です。プレイヤーごとに異なる鍵で暗号化しておけば、鍵セットを削除するだけで、そのプレイヤーの暗号化された値は復号できなくなります（暗号シュレッディング）。巨大なテーブルを書き換える必要はありません。"
+    c: "ハッシュ化は元に戻せないため、権限のある担当者が元の値を参照するという要件を満たせません。"
+    d: "CMEK はテーブルやデータセットの単位で設定する鍵で、プレイヤーごとには分けられません。鍵バージョンを破棄すると、すべてのプレイヤーのデータが読めなくなります。"
+  explanation: |
+    **暗号シュレッディング**（crypto-deletion）は、データそのものではなく **鍵を削除** することで、その鍵で暗号化したデータを読めなくする手法です。BigQuery では AEAD 暗号化関数で実現できます。
+
+    1. `KEYS.NEW_KEYSET('AEAD_AES_GCM_256')` でプレイヤーごとの鍵セットを作り、鍵用のテーブルに保存する
+    2. 取り込み時に、個人情報の列を `AEAD.ENCRYPT(鍵セット, 値, 追加データ)` で暗号化する
+    3. 参照するときは、鍵用のテーブルと結合して `AEAD.DECRYPT_STRING` で復号する
+    4. 削除依頼を受けたら、鍵用のテーブルからそのプレイヤーの鍵セットの行を削除する
+
+    - 書き換えるのは小さな鍵用のテーブルだけなので、巨大なテーブルへの `DELETE` に比べて処理が軽くなります。
+    - 鍵用のテーブルへのアクセスは、ログのテーブルよりも厳しく制限します。`KEYS.NEW_WRAPPED_KEYSET` で鍵セットを Cloud KMS の鍵でラップすると、鍵セット自体も保護できます。
+    - 鍵用のテーブルで削除した行も、タイムトラベル期間とその後のフェイルセーフ期間には復元できる可能性があります。削除が完了したとみなす時期は、これらの期間を考慮して決めます。
+  diagram: |
+    flowchart TD
+      R["削除依頼"] -->|鍵セットの行だけを削除| K["鍵用テーブル<br/>プレイヤーごとの鍵セット"]
+      L["行動ログのテーブル<br/>個人情報は暗号文"] --> Q["分析クエリ"]
+      K -->|結合して復号| Q
+      Q -.->|鍵がないため復号できない| X["退会者の個人情報"]
+  references:
+    - title: "AEAD 暗号化のコンセプト"
+      url: "https://docs.cloud.google.com/bigquery/docs/aead-encryption-concepts"
+    - title: "AEAD 暗号化関数"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/aead_encryption_functions"
+
+- id: design-security-011
+  domain: design
+  services: [dataflow, kms, pubsub]
+  type: multiple
+  question: |
+    あるデジタル広告企業は、広告の表示イベントを Pub/Sub から読み取り、`asia-northeast1` リージョンで実行する Dataflow のストリーミングパイプラインで集計して BigQuery に書き込んでいます。セキュリティ方針の変更により、Pub/Sub と BigQuery に加えて、Dataflow のジョブがワーカーのディスクや Streaming Engine に保存するパイプラインの状態も、自社が管理する Cloud KMS の鍵で保護する必要があります。
+
+    Dataflow について必要な対応はどれですか？
+  choices:
+    a: "マルチリージョン `asia` に Cloud KMS の鍵を作成し、どのリージョンで実行するジョブからも同じ鍵を使えるようにする"
+    b: "Pub/Sub のトピックに CMEK を設定し、Dataflow のパイプラインの状態にもトピックと同じ鍵が自動で使われるようにする"
+    c: "パイプラインのオプション `dataflowKmsKey` に、`asia-northeast1` に作成した Cloud KMS の鍵を指定してジョブを起動する"
+    d: "ジョブを起動するデータエンジニアに、その鍵の `roles/cloudkms.admin` を付与してからジョブを起動する"
+    e: "Dataflow サービスエージェントと Compute Engine サービスエージェントに、その鍵の暗号化と復号のロールを付与する"
+  answer: [c, e]
+  choiceNotes:
+    a: "Dataflow の CMEK には、ジョブを実行するリージョンと同じリージョンに作成した鍵を使います。リージョンの異なるジョブで1つの鍵を共用することはできません。"
+    b: "Pub/Sub の CMEK はトピックに保存されるメッセージを保護するもので、Dataflow のジョブには適用されません。Dataflow 側で鍵を指定する必要があります。"
+    c: "正解です。`dataflowKmsKey`（Python では `dataflow_kms_key`）で鍵を指定すると、ワーカーのディスクや Streaming Engine の状態など、Dataflow が保存するデータがその鍵で保護されます。鍵はジョブと同じリージョンに作成します。"
+    d: "鍵の管理者ロールは鍵の作成や管理のためのロールで、暗号化と復号には使われません。要件を満たさないうえ、過剰な権限です。"
+    e: "正解です。Dataflow で CMEK を使うには、Dataflow サービスエージェントと Compute Engine サービスエージェントの両方に、その鍵の `roles/cloudkms.cryptoKeyEncrypterDecrypter` が必要です。"
+  explanation: |
+    パイプライン全体を CMEK で保護するには、**サービスごとに** CMEK を設定します。あるサービスの設定が、ほかのサービスに引き継がれることはありません。
+
+    | サービス | 鍵を設定する場所 | 鍵を使うアカウント |
+    | --- | --- | --- |
+    | Pub/Sub | トピック | Pub/Sub サービスエージェント |
+    | Dataflow | ジョブのオプション `dataflowKmsKey` | Dataflow サービスエージェントと Compute Engine サービスエージェント |
+    | BigQuery | データセットのデフォルトの鍵、またはテーブル | BigQuery のサービスアカウント |
+    | Cloud Storage | バケットのデフォルトの鍵、またはオブジェクト | Cloud Storage サービスエージェント |
+
+    - Dataflow の鍵は、ジョブと同じリージョンに作成します。
+    - ジョブ名やパラメータの値などのジョブのメタデータは CMEK の対象外なので、機密情報を含めないようにします。
+    - 鍵で暗号化・復号を行うのは「人」ではなく各サービスのサービスエージェントである、という点がよく問われます。
+  references:
+    - title: "顧客管理の暗号鍵を使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/customer-managed-encryption-keys"
+    - title: "顧客管理の暗号鍵（CMEK）"
+      url: "https://docs.cloud.google.com/kms/docs/cmek"
+
+- id: design-security-012
+  domain: design
+  services: [dlp, bigquery, kms]
+  type: single
+  question: |
+    あるクレジットカード会社は、カード利用明細のデータを BigQuery の分析環境に連携する前に、カード番号を仮名化することにしました。要件は次のとおりです。
+
+    - 分析環境の既存のシステムが16桁の数字であることを検証するため、仮名化した後も16桁の数字の形式を保つ
+    - 同じカード番号は常に同じ値に置き換え、複数のテーブルを結合できるようにする
+    - 不正調査チームが、必要なときに元のカード番号に戻せるようにする
+
+    Sensitive Data Protection のどの変換を使うべきですか？
+  choices:
+    a: "Cloud KMS でラップした鍵を使い、暗号ハッシュ（CryptoHashConfig）でカード番号をハッシュ値に置き換える"
+    b: "文字によるマスキングで、カード番号の末尾4桁以外の数字をすべて `#` に置き換える"
+    c: "Cloud KMS でラップした鍵を使い、決定論的暗号化（CryptoDeterministicConfig）でカード番号をトークンに置き換える"
+    d: "Cloud KMS でラップした鍵を使い、形式保持暗号化（FPE）でカード番号を同じ桁数の数字のトークンに置き換える"
+  answer: [d]
+  choiceNotes:
+    a: "同じ値は同じハッシュ値になるため結合はできますが、ハッシュは元に戻せません。出力も16桁の数字にはなりません。"
+    b: "元の値には戻せません。また、末尾4桁が同じカード番号は同じ値になるため、カード番号を区別して結合することもできません。"
+    c: "同じ値は同じトークンになり、元の値にも戻せますが、トークンは元の形式を保ちません。16桁の数字という形式の要件を満たしません。"
+    d: "正解です。FPE は、元の値と同じ文字の種類（ここでは数字）と長さのトークンを生成します。同じ鍵を使えば同じカード番号は常に同じトークンになり、鍵を使って元の値に戻す（再識別する）こともできます。"
+  explanation: |
+    Sensitive Data Protection の主な匿名化の変換は、次の3つの観点で使い分けます。
+
+    | 変換 | 元に戻せる | 形式を保つ | 結合のキーに使える |
+    | --- | --- | --- | --- |
+    | 文字によるマスキング | × | 長さだけ保つ | × |
+    | 暗号ハッシュ（CryptoHashConfig） | × | × | ○ |
+    | 決定論的暗号化（CryptoDeterministicConfig） | ○ | × | ○ |
+    | 形式保持暗号化（FPE、CryptoReplaceFfxFpeConfig） | ○ | ○ | ○ |
+
+    - 形式を保つ必要がない場合は、FPE ではなく決定論的暗号化を使うことが推奨されています。FPE は「既存のシステムが形式を検証する」などの理由がある場合に選びます。
+    - 元に戻す（再識別する）ときは、匿名化に使ったのと同じ鍵の設定で再識別のリクエストを実行します。鍵へのアクセス権を持つ担当者だけが元の値を得られます。
+    - 変換の設定は匿名化テンプレートとして保存し、パイプラインから再利用できます。
+  references:
+    - title: "変換のリファレンス"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/transformations-reference"
+    - title: "機密データの匿名化"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/deidentify-sensitive-data"
+
+- id: design-security-013
+  domain: design
+  services: [dlp, bigquery]
+  type: single
+  question: |
+    ある大学病院は、電子カルテから抽出した入院データを、外部の研究機関との共同研究のために共有します。入院日、手術日、退院日などの日付は、ほかの情報と組み合わせると患者の特定につながるおそれがあるため、そのままでは共有できません。一方で研究機関は、患者ごとに「手術から退院までの日数」や「退院から再入院までの日数」を分析する必要があります。
+
+    日付をどのように匿名化すべきですか？
+  choices:
+    a: "Sensitive Data Protection の日付シフトで患者 ID の列をコンテキストに指定し、患者ごとに異なる日数だけ日付をずらす"
+    b: "Sensitive Data Protection の日付の一部を抽出する変換（TimePartConfig）で、すべての日付を年の値だけに置き換える"
+    c: "BigQuery の `DATE_ADD` 関数で、すべての患者のすべての日付を同じ固定の日数だけずらしてから共有する"
+    d: "Sensitive Data Protection の暗号ハッシュで、日付の値をすべてハッシュ値に置き換えてから共有する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。患者 ID をコンテキストに指定すると、同じ患者の日付はすべて同じ日数だけずれ、患者が異なればずらす日数も異なります。日付どうしの間隔が保たれるため、研究に必要な日数の分析ができます。"
+    b: "年の値だけにすると、手術から退院までの日数のような間隔を計算できなくなります。"
+    c: "全員を同じ日数だけずらすと、1人の本来の日付が分かっただけで全員の日付を元に戻せてしまい、匿名化として不十分です。"
+    d: "ハッシュ値は日付として扱えないため、日付どうしの間隔を計算できません。"
+  explanation: |
+    **日付シフト** は、日付をランダムな日数だけずらす匿名化の方法です。コンテキスト（患者 ID などの列）を指定すると、同じコンテキストの日付は一貫して同じ日数だけずれます。
+
+    | 設定 | 効果 |
+    | --- | --- |
+    | ずらす日数の上限と下限 | 例：-100〜+100日の範囲でずらす |
+    | コンテキスト（患者 ID の列） | 同じ患者の日付は同じ日数だけずれるため、日付の間隔が保たれる |
+    | 暗号鍵 | 同じ鍵とコンテキストなら、何度実行しても同じ日数だけずれる |
+
+    - コンテキストを指定する場合は、暗号鍵も指定する必要があります。
+    - コンテキストを使った日付シフトは、BigQuery のテーブルのような表形式のデータで使えます。
+    - 患者 ID 自体も、決定論的暗号化などで仮名化してから共有するのが一般的です。
+  references:
+    - title: "日付シフト"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/concepts-date-shifting"
+    - title: "機密データの匿名化"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/deidentify-sensitive-data"
+
+- id: design-security-014
+  domain: design
+  services: [dlp, bigquery, dataplex]
+  type: single
+  question: |
+    ある自治体の統計部門は、住民の健康診断の結果をオープンデータとして公開する予定です。氏名や住所などの直接の識別子は削除済みですが、年齢、郵便番号、性別の組み合わせによって個人が特定されるおそれがあると指摘されました。公開する前に、これらの列の組み合わせで個人が特定されるリスクがどの程度あるかを定量的に評価したいと考えています。データは BigQuery のテーブルにあります。
+
+    どの方法を使うべきですか？
+  choices:
+    a: "データプロファイルスキャンをテーブルに実行し、年齢・郵便番号・性別の各列の一意な値の割合と NULL の割合を確認する"
+    b: "Sensitive Data Protection の検査ジョブでテーブルをスキャンし、個人情報に該当する infoType が残っていないかを確認する"
+    c: "Sensitive Data Protection のリスク分析ジョブで、年齢・郵便番号・性別を準識別子に指定して k-匿名性を計算する"
+    d: "BigQuery の `APPROX_COUNT_DISTINCT` 関数で、年齢・郵便番号・性別の各列に含まれる一意な値の数を集計する"
+  answer: [c]
+  choiceNotes:
+    a: "列ごとの統計は分かりますが、複数の列を組み合わせたときに一意になるレコードがどれだけあるかは分かりません。"
+    b: "検査ジョブは、メールアドレスや電話番号などの infoType を検出する機能です。列の組み合わせによる特定のリスクは評価できません。"
+    c: "正解です。k-匿名性は、準識別子の値の組み合わせが同じレコードが何件あるかに基づく指標です。組み合わせが一意になるレコードが多いほど、個人が特定されるリスクが高いと判断できます。"
+    d: "列ごとの一意な値の数しか分からず、列の組み合わせによる特定のリスクを評価できません。"
+  explanation: |
+    Sensitive Data Protection の **再識別リスク分析** では、データから個人が特定されるリスクを評価できます。
+
+    | 指標 | 評価する内容 |
+    | --- | --- |
+    | k-匿名性 | 準識別子の組み合わせが同じレコードが、少なくとも k 件あるか |
+    | l-多様性 | 同じ組み合わせのグループの中に、機微な値（病名など）が少なくとも l 種類あるか |
+    | k-map | 国勢調査などの外部のデータと照らし合わせたときの特定のリスク |
+    | δ-presence | ある個人がデータセットに含まれていること自体が分かってしまう確率 |
+
+    - **準識別子**：単独では個人を特定できないが、組み合わせると特定につながる列（年齢、郵便番号、性別など）。
+    - k の値が小さいグループが多い場合は、年齢を5歳刻みにする、郵便番号の下位の桁を削るなどの一般化を行い、改めてリスクを評価します。
+    - 「どの列に個人情報があるか」は検査、「列の組み合わせで個人が特定されるか」はリスク分析で調べます。
+  references:
+    - title: "再識別リスク分析"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/concepts-risk-analysis"
+    - title: "データセットの k-匿名性を計算する"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/compute-k-anonymity"
+
+- id: design-security-015
+  domain: design
+  services: [dlp, bigquery, dataplex]
+  type: single
+  question: |
+    ある複合企業グループは、約300のプロジェクトに数千の BigQuery テーブルを持っています。各事業部がテーブルを日々追加しており、セキュリティチームは、どのテーブルにどの程度機密性の高い個人情報が含まれているかを把握できていません。組織全体のテーブルを継続的に調べ、新しく追加されたテーブルも自動的に対象に含めて、機密性とリスクの高いテーブルから優先的に対策したいと考えています。
+
+    運用の手間を最小限に抑えるには、どうすればよいですか？
+  choices:
+    a: "テーブルごとに Sensitive Data Protection の検査ジョブを作成し、Cloud Scheduler から毎週実行して結果をセキュリティチームに通知する"
+    b: "Sensitive Data Protection の検出で、組織全体を対象とする BigQuery のスキャン構成を作成し、データプロファイルを生成する"
+    c: "組織全体のデータアクセス監査ログを BigQuery にエクスポートし、参照回数の多いテーブルから順に機密データを含むテーブルとして扱う"
+    d: "すべてのテーブルに Dataplex のデータ品質スキャンを設定し、メールアドレスや電話番号の形式に一致する値を検出するルールを追加する"
+  answer: [b]
+  choiceNotes:
+    a: "テーブルの数だけジョブを作成・管理する必要があり、テーブルを追加するたびに設定も必要です。運用の手間が大きくなります。"
+    b: "正解です。検出サービスは、組織やフォルダの配下のテーブルを継続的にプロファイリングし、新しいテーブルも自動で対象にします。テーブルや列ごとに、検出された infoType や機密性・データリスクのレベルが分かるため、優先順位を付けて対策できます。"
+    c: "参照回数はテーブルの機密性を表すものではなく、個人情報を含むテーブルを正しく特定できません。"
+    d: "データ品質スキャンはデータの品質を検証する機能で、機密データの種類や機密性を評価する仕組みではありません。すべてのテーブルにルールを作る手間もかかります。"
+  explanation: |
+    Sensitive Data Protection には、目的の異なる2つの調べ方があります。
+
+    | 機能 | 対象 | 向いている用途 |
+    | --- | --- | --- |
+    | 検出（データプロファイル） | 組織・フォルダ・プロジェクト全体を継続的に | どこに機密データがあるかを把握する |
+    | 検査ジョブ | 特定のテーブルやバケットを詳細に | 個々の検出結果を確認する、匿名化の前に調べる |
+
+    - データプロファイルはプロジェクト・テーブル・列の単位で作成され、検出された infoType や機密性・データリスクのレベルが含まれます。
+    - プロファイルのコピーを BigQuery に保存すれば、組織全体の状況を SQL で分析できます。
+    - 結果をもとに、機密性の高い列へのポリシータグの付与など、具体的な対策を進めます。
+  references:
+    - title: "機密データの検出の概要"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/data-profiles"
+    - title: "組織またはフォルダ内の BigQuery データをプロファイリングする"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/profile-org-folder"
+
+- id: design-security-016
+  domain: design
+  services: [dlp, dataflow, cloud-storage, bigquery]
+  type: single
+  question: |
+    ある通信会社のコールセンターでは、オペレーターが入力した応対メモを含む CSV ファイルが、Cloud Storage のバケットに継続的に出力されます。メモの自由記述には、顧客の電話番号や氏名が含まれることがあります。このデータを BigQuery に取り込んで分析したいものの、個人情報は BigQuery に保存する前に匿名化しなければなりません。開発と運用の手間はできるだけ抑えたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Dataproc のクラスタで、電話番号と氏名を正規表現で置き換える Spark ジョブを開発し、ファイルが届くたびに実行する"
+    b: "CSV ファイルをそのまま BigQuery に読み込み、Sensitive Data Protection の検査ジョブで個人情報が見つかった列を後から削除する"
+    c: "CSV ファイルをそのまま BigQuery に読み込み、応対メモの列に動的データマスキングを設定して、アナリストにはマスキングした値だけを見せる"
+    d: "Sensitive Data Protection を呼び出す Dataflow のテンプレートで、CSV を匿名化しながら BigQuery に取り込む"
+  answer: [d]
+  choiceNotes:
+    a: "パイプラインの開発とクラスタの運用が必要です。氏名のように形式が決まっていない情報は、正規表現では正確に検出できません。"
+    b: "匿名化する前の個人情報が BigQuery に保存されてしまいます。また、自由記述の列を削除すると、分析に必要なメモそのものが失われます。"
+    c: "個人情報がそのまま BigQuery に保存されます。列全体を隠すことになるため、メモの内容を分析することもできません。"
+    d: "正解です。Google が提供する Data Masking/Tokenization from Cloud Storage to BigQuery テンプレートは、Cloud Storage の CSV ファイルを読み取り、Sensitive Data Protection の API で匿名化してから BigQuery に書き込みます。匿名化の方法は Sensitive Data Protection の匿名化テンプレートで指定でき、パイプラインを開発する必要はありません。"
+  explanation: |
+    個人情報を含むデータを取り込むときは、**保存する前に匿名化する** のが原則です。
+
+    - Sensitive Data Protection の **検査テンプレート** と **匿名化テンプレート** に、検出する infoType と変換の方法を保存しておくと、複数のパイプラインで同じ設定を再利用できます。
+    - 自由記述のテキストに含まれる個人情報も、infoType（`PHONE_NUMBER`、`PERSON_NAME` など）で検出して置き換えられます。
+    - Cloud Storage の CSV ファイルを匿名化して BigQuery に書き込む処理は、Google 提供の Dataflow テンプレートで実現できます。Pub/Sub から流れてくるデータの場合も、Dataflow のパイプラインから Sensitive Data Protection の API を呼び出して匿名化する構成が基本です。
+
+    | 方法 | 個人情報が BigQuery に保存されるか |
+    | --- | --- |
+    | 取り込み時に匿名化する | 保存されない |
+    | 取り込み後に動的データマスキングを設定する | 保存される（見え方だけが変わる） |
+    | 取り込み後に検査して削除する | 一時的に保存される |
+  diagram: |
+    flowchart TD
+      CC["コールセンター"] --> GCS["Cloud Storage<br/>CSV ファイル"]
+      GCS --> DF["Dataflow<br/>Google 提供のテンプレート"]
+      DF -->|匿名化を依頼| DLP["Sensitive Data Protection<br/>匿名化テンプレート"]
+      DLP -.->|匿名化した結果| DF
+      DF -->|匿名化済みのデータ| BQ["BigQuery"]
+  references:
+    - title: "Data Masking/Tokenization from Cloud Storage to BigQuery（Cloud DLP を使用）テンプレート"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/dlp-text-to-bigquery"
+    - title: "機密データの匿名化"
+      url: "https://docs.cloud.google.com/sensitive-data-protection/docs/deidentify-sensitive-data"
+
+- id: design-security-017
+  domain: design
+  services: [bigquery, iam, dlp]
+  type: single
+  question: |
+    あるネット通販企業は、注文テーブルを BigQuery で管理しています。マーケティング部のアナリストは、このテーブルを直接参照する既存のクエリやダッシュボードで、メールアドレスごとの注文回数や、重複を除いた顧客数を集計しています。個人情報保護の強化のため、アナリストにはメールアドレスの実際の値を見せないようにしたいものの、これらの集計は今までどおり行えるようにする必要があります。一方、カスタマーサポート部門は実際のメールアドレスを参照します。テーブルは複製せず、アナリストのクエリも変更したくありません。
+
+    どうすればよいですか？
+  choices:
+    a: "メールアドレスの列にポリシータグを付けて列レベルのアクセス制御を設定し、サポート部門にだけ Fine-Grained Reader を付与して、アナリストには列へのロールを付与しない"
+    b: "メールアドレスを `SHA256` 関数で変換した列を返すビューを別のデータセットに作成し、承認済みビューとしてアナリストのグループに公開する"
+    c: "メールアドレスの列に SHA-256 ハッシュのマスキングを設定し、アナリストに Masked Reader、サポート部門に Fine-Grained Reader を付与する"
+    d: "Sensitive Data Protection でメールアドレスをハッシュ化した注文テーブルの複製を毎日作成し、アナリストのグループにはその複製のテーブルだけを参照させる"
+  answer: [c]
+  choiceNotes:
+    a: "Fine-Grained Reader も Masked Reader も持たないアナリストがその列を参照すると、アクセス拒否のエラーになります。既存のクエリが動かなくなります。"
+    b: "アナリストが参照する対象がテーブルからビューに変わるため、既存のクエリとダッシュボードを変更する必要があります。"
+    c: "正解です。Masked Reader を持つアナリストがクエリを実行すると、メールアドレスはハッシュ値に置き換えて返されます。同じ値は同じハッシュ値になるため、メールアドレスごとの集計や重複を除いた件数の集計は引き続きできます。"
+    d: "テーブルを複製しないという要件に反し、毎日の変換処理も必要です。参照するテーブルも変わるため、クエリの変更が必要になります。"
+  explanation: |
+    **動的データマスキング** は、ポリシータグにデータポリシー（マスキングルール）を関連付けて、ユーザーのロールに応じて列の値の見え方を変える機能です。
+
+    | ユーザーが持つロール | クエリ結果 |
+    | --- | --- |
+    | Fine-Grained Reader（ポリシータグに対して） | 実際の値 |
+    | Masked Reader（データポリシーに対して） | マスキングされた値 |
+    | どちらもなし | その列を参照するとアクセス拒否 |
+
+    主なマスキングルールは次のとおりです（括弧内は英語版のドキュメントでの名前）。
+
+    - **SHA-256 ハッシュ（Hash (SHA-256)）**：同じ値は同じハッシュ値になるため、集計や結合のキーに使える
+    - **メールのマスク（Email mask）**：メールアドレスのユーザー名の部分を置き換える
+    - **末尾4文字・先頭4文字（Last four characters、First four characters）**：一部の文字だけを残す
+    - **日付の年のマスク（Date year mask）**：日付を年の始まりに丸める
+    - **デフォルトのマスキング値・NULL 化（Default masking value、Nullify）**：データ型に応じた既定の値や NULL に置き換える
+
+    テーブルの複製やクエリの変更なしに、列ごと・ユーザーごとに見せ方を変えられる点が特徴です。
+  references:
+    - title: "データ マスキングの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/column-data-masking-intro"
+    - title: "列データをマスキングする"
+      url: "https://docs.cloud.google.com/bigquery/docs/column-data-masking"
+
+- id: design-security-018
+  domain: design
+  services: [bigquery, iam]
+  type: single
+  question: |
+    ある製薬会社は、全国の医療機関向けの販売実績を BigQuery の1つのテーブル `sales_results` に格納しています。テーブルには `region` 列（北海道、関東、近畿など）があります。各地域の営業マネージャーには自分の地域の行だけを見せ、本社の営業企画部にはすべての行を見せる必要があります。地域ごとにテーブルやビューを作ると管理が煩雑になるため、1つのテーブルのまま制御したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "`region` 列にポリシータグを付け、地域ごとのポリシータグに対する Fine-Grained Reader を各地域のマネージャーに付与する"
+    b: "`region` で絞り込む行アクセスポリシーを地域ごとに作成してマネージャーに付与し、営業企画部には `FILTER USING (TRUE)` のポリシーを付与する"
+    c: "地域ごとに `sales_results` を分割したテーブルを作成し、テーブル単位の IAM で各地域のマネージャーに読み取りを許可する"
+    d: "地域ごとに `region` で絞り込むビューを作成し、各ビューを承認済みビューとして元のデータセットに登録して、マネージャーに公開する"
+  answer: [b]
+  choiceNotes:
+    a: "ポリシータグは列単位のアクセス制御で、行を絞り込むことはできません。"
+    b: "正解です。行アクセスポリシーを使うと、1つのテーブルのまま、クエリを実行したユーザーに応じて返す行を絞り込めます。すべての行を見せるユーザーには、条件を `TRUE` にしたポリシーを付与します。"
+    c: "地域ごとのテーブルの作成と、データを振り分ける処理が必要になり、管理が煩雑になります。"
+    d: "地域ごとにビューを作成・管理する必要があり、1つのテーブルのまま制御したいという要件に反します。"
+  explanation: |
+    **行レベルのセキュリティ** は、行アクセスポリシーでテーブルの行へのアクセスを制御する機能です。
+
+    ```sql
+    CREATE ROW ACCESS POLICY kanto_filter
+    ON sales.sales_results
+    GRANT TO ('group:kanto-managers@example.com')
+    FILTER USING (region = '関東');
+    ```
+
+    - ユーザーには、付与されたポリシーの条件に一致する行だけが返されます。複数のポリシーが付与されている場合は、いずれかの条件に一致する行が返されます。
+    - 行アクセスポリシーが1つでもあるテーブルでは、どのポリシーも付与されていないユーザーには行が返されません。すべての行を見るユーザーには `FILTER USING (TRUE)` のポリシーを付与します。
+    - `SESSION_USER()` を条件に使うと、「担当者のメールアドレスと一致する行だけ」のような制御もできます。
+    - 列を隠すにはポリシータグ（列レベルのアクセス制御）、行を絞り込むには行アクセスポリシーを使います。
+  references:
+    - title: "BigQuery の行レベルのセキュリティの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/row-level-security-intro"
+    - title: "行レベルのセキュリティを使用する"
+      url: "https://docs.cloud.google.com/bigquery/docs/managing-row-level-security"
+
+- id: design-security-019
+  domain: design
+  services: [bigquery, iam]
+  type: single
+  question: |
+    あるマーケティング支援企業では、データ基盤チームが BigQuery の `curated` データセットで顧客や取引のテーブルを管理しています。マーケティングチームは、自分たちの `marketing_views` データセットに `curated` のテーブルを参照するビューを50以上作成しており、毎週のように新しいビューを追加しています。マーケティングチームのユーザーには `curated` のテーブルを直接参照させず、ビュー経由でだけデータを使わせる必要があります。現在はビューを作るたびに承認済みビューとして登録しており、その作業が負担になっています。
+
+    運用の手間を最小限に抑えて要件を満たすには、どうすればよいですか？
+  choices:
+    a: "`marketing_views` データセットを、`curated` データセットの承認済みデータセットとして登録する"
+    b: "新しいビューを作成するたびに、承認済みビューとして `curated` データセットに追加するスクリプトを作成して自動化する"
+    c: "マーケティングチームのユーザーに、`curated` データセットに対する `roles/bigquery.dataViewer` を付与する"
+    d: "`curated` のテーブルを毎日 `marketing_views` データセットにコピーし、ビューからはコピーしたテーブルを参照する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。承認済みデータセットとして登録すると、そのデータセットにある現在と将来のすべてのビューが `curated` のデータにアクセスできるようになります。ユーザーにはビューへのアクセス権だけを付与すればよく、`curated` へのアクセス権は不要です。"
+    b: "自動化しても、ビューごとに承認を登録する仕組みを作成・保守する必要があります。承認済みデータセットを使えば、その仕組み自体が不要です。"
+    c: "ユーザーが `curated` のテーブルを直接参照できるようになり、ビュー経由でだけ使わせるという要件に反します。"
+    d: "データの複製とコピー処理の管理が必要になり、コピーしたテーブルをユーザーが直接参照できてしまいます。"
+  explanation: |
+    元のテーブルへのアクセス権を与えずにデータを使わせる方法として、次の3つを区別しておきます。
+
+    | 方法 | 承認する単位 | 向いている場面 |
+    | --- | --- | --- |
+    | 承認済みビュー | 個々のビュー | 共有するビューが少ない |
+    | 承認済みデータセット | データセット内のすべてのビュー（今後追加されるものも含む） | ビューが多い、頻繁に追加される |
+    | 承認済みルーティン | 個々のテーブル関数や UDF | パラメータを受け取って結果を返したい |
+
+    - ユーザーには、ビューのあるデータセット（またはビュー）への閲覧権限を付与します。元のデータセットへの権限は不要です。
+    - 承認済みデータセットの中のビューはすべて元のデータにアクセスできるため、そのデータセットでビューを作成・更新できるユーザーは慎重に限定します。
+    - 元のデータセットと、ビューのあるデータセットは、同じロケーションにある必要があります。
+  diagram: |
+    flowchart TD
+      U["マーケティングチーム"] -->|閲覧権限| MV["marketing_views<br/>50以上のビュー"]
+      MV -->|承認済みデータセット| C["curated<br/>顧客・取引のテーブル"]
+      U -.->|直接の参照は不可| C
+  references:
+    - title: "承認済みデータセット"
+      url: "https://docs.cloud.google.com/bigquery/docs/authorized-datasets"
+    - title: "承認済みビュー"
+      url: "https://docs.cloud.google.com/bigquery/docs/authorized-views"
+
+- id: design-security-020
+  domain: design
+  services: [iam, bigquery, cloud-storage, vpc-sc]
+  type: single
+  question: |
+    ドイツに本社を置くある小売企業は、EU の一般データ保護規則（GDPR）への対応方針として、顧客データを EU 域内のロケーションにだけ保存することにしました。開発者は BigQuery のデータセットや Cloud Storage のバケットを各自で作成しており、誤って米国のリージョンやマルチリージョンを選ぶおそれがあります。組織内のすべてのプロジェクトで、EU 域外にリソースが作成されること自体を防ぎたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "組織内のすべてのプロジェクトを VPC Service Controls のサービス境界に含め、EU 域外からの API アクセスを拒否する"
+    b: "リソースを作成するときは必ず EU のロケーションを指定するよう開発ガイドラインで義務付け、定期的に研修を行う"
+    c: "Cloud Audit Logs を監視し、EU 域外に作成されたデータセットやバケットを検出したら自動で削除する仕組みを作る"
+    d: "組織にリソースロケーションの組織ポリシーを設定し、値のグループ `in:eu-locations` のロケーションだけを許可する"
+  answer: [d]
+  choiceNotes:
+    a: "VPC Service Controls は、API にアクセスできる場所やデータの持ち出しを制御する機能です。リソースを作成するロケーションは制限できません。"
+    b: "ガイドラインだけでは、誤った操作を技術的に防げません。"
+    c: "作成された後に対処する方法で、一時的に EU 域外にデータが保存されるおそれがあります。仕組みの開発と保守も必要です。"
+    d: "正解です。リソースロケーションの制約（`constraints/gcp.resourceLocations`）を設定すると、許可したロケーション以外にはリソースを作成できなくなります。`in:eu-locations` は Google が管理する EU のロケーションのグループで、EU に新しいリージョンが追加されても組織ポリシーを変更する必要はありません。"
+  explanation: |
+    データの保存場所（データレジデンシー）の要件には、**リソースロケーションの組織ポリシー** で対応します。
+
+    - 組織・フォルダ・プロジェクトに設定でき、配下に継承されます。
+    - 個別のリージョンのほか、`in:eu-locations` のような値のグループを指定できます。値のグループは Google が更新するため、ロケーションが追加されても設定を変える必要がありません。
+    - 制約は **新しく作成するリソース** に適用されます。既存のリソースは移動されないため、別途確認します。
+    - BigQuery のデータセットは作成後にロケーションを変更できず、別のロケーションに移すにはデータのコピーが必要です。最初の設計で、リージョン（例：`europe-west3`）とマルチリージョン（例：`EU`）のどちらにするかを決めておきます。
+
+    | 要件 | 主な手段 |
+    | --- | --- |
+    | 特定の地域にだけデータを保存する | リソースロケーションの組織ポリシー |
+    | 規制に応じた管理策（保存場所やサポート担当者の制限など）をまとめて適用する | Assured Workloads |
+    | データを境界の外に持ち出させない | VPC Service Controls |
+  references:
+    - title: "リソースのロケーションの制限"
+      url: "https://docs.cloud.google.com/resource-manager/docs/organization-policy/defining-locations"
+
+- id: design-security-021
+  domain: design
+  services: [iam, kms, vpc-sc, networking]
+  type: single
+  question: |
+    ある IT サービス企業は、EU 加盟国の行政機関から、市民の手続きデータを扱うシステムの構築を受託しました。契約では、データを EU 域内にだけ保存することに加えて、Google のサポート担当者がサポートを行う場合も EU 域内の担当者に限ることが求められています。これらの管理策をこのシステム用のすべてのプロジェクトに一貫して適用し、設定の漏れを防ぎたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "EU のリージョンにだけサブネットを持つ共有 VPC を作成し、システム用のすべてのリソースをその VPC ネットワークに接続する"
+    b: "システム用のフォルダにリソースロケーションの組織ポリシーを設定して EU のロケーションだけを許可し、すべてのリソースを CMEK で保護する"
+    c: "Assured Workloads で EU のデータ境界のコントロールパッケージを選んでフォルダを作成し、そのフォルダの中にシステム用のプロジェクトを作成する"
+    d: "システム用のプロジェクトを VPC Service Controls のサービス境界に含め、アクセスレベルで EU 域内からのアクセスだけを許可する"
+  answer: [c]
+  choiceNotes:
+    a: "BigQuery や Cloud Storage のデータは VPC ネットワークの中に保存されるわけではないため、保存場所の制限になりません。サポート担当者の制限もできません。"
+    b: "データの保存場所は制限できますが、Google のサポート担当者を EU 域内の担当者に限るという要件は満たせません。"
+    c: "正解です。Assured Workloads のフォルダを作成すると、選んだコントロールパッケージに応じて、データの保存場所やサポート担当者の制限などの管理策が、フォルダ内のすべてのプロジェクトに適用されます。"
+    d: "VPC Service Controls は API へのアクセスとデータの持ち出しを制御する機能で、データの保存場所やサポート担当者は制限できません。"
+  explanation: |
+    **Assured Workloads** は、規制やコンプライアンスの要件に合わせた管理策（コントロールパッケージ）を、フォルダ単位でまとめて適用するサービスです。
+
+    - フォルダを作成するときに、EU のデータ境界とサポート、米国の FedRAMP や ITAR など、対応する規制に合わせたコントロールパッケージを選びます。
+    - 管理策には、リソースのロケーションの制限、利用できるサービスの制限、Google の担当者によるサポートやアクセスの制限などがあり、組織ポリシーなどで強制されます。
+    - フォルダ内に作成したプロジェクトには自動的に管理策が適用されるため、プロジェクトごとの設定漏れを防げます。
+
+    | 要件 | 主な手段 |
+    | --- | --- |
+    | データの保存場所だけを制限する | リソースロケーションの組織ポリシー |
+    | 保存場所に加えて、サポート担当者や利用できるサービスなども規制に合わせる | Assured Workloads |
+    | 鍵素材を Google Cloud の外で管理する | Cloud EKM |
+  references:
+    - title: "Assured Workloads の概要"
+      url: "https://docs.cloud.google.com/assured-workloads/docs/overview"
+
+- id: design-security-022
+  domain: design
+  services: [vpc-sc, networking, dataflow, bigquery]
+  type: multiple
+  question: |
+    ある総合病院グループは、Cloud Storage に保存した診療記録のファイルを Dataflow のバッチパイプラインで加工し、BigQuery に書き込んでいます。情報セキュリティ部門から、次の2つの要件が示されました。
+
+    - Dataflow のワーカーには外部 IP アドレスを付与せず、インターネットへの出口も設けない
+    - 正規の認証情報を持つ職員であっても、BigQuery や Cloud Storage のデータを組織外のプロジェクトにコピーできないようにする
+
+    これらの要件を満たすには、どの対応を組み合わせるべきですか？
+  choices:
+    a: "ワーカーを外部 IP アドレスなしで起動し、ワーカーが使うサブネットで限定公開の Google アクセスを有効にする"
+    b: "ワーカーに外部 IP アドレスを付与し、Google API の IP アドレス範囲以外への下り通信を拒否するファイアウォールルールを作成する"
+    c: "データエンジニアのロールを `roles/bigquery.dataViewer` と `roles/storage.objectViewer` に限定し、書き込みの権限を外す"
+    d: "データを扱うプロジェクトを VPC Service Controls のサービス境界に含め、BigQuery、Cloud Storage、Dataflow を制限対象のサービスにする"
+    e: "Cloud NAT を構成し、外部 IP アドレスを持たないワーカーが Cloud NAT を経由して Google API にアクセスできるようにする"
+  answer: [a, d]
+  choiceNotes:
+    a: "正解です。外部 IP アドレスを持たない VM から BigQuery や Cloud Storage などの Google API にアクセスするには、サブネットで限定公開の Google アクセスを有効にします。インターネットへの出口は必要ありません。"
+    b: "ワーカーに外部 IP アドレスを付与しないという要件に反します。また、正規の認証情報による組織外へのコピーは防げません。"
+    c: "読み取り権限があれば、クエリ結果を組織外の自分のプロジェクトに保存するなどの方法でデータを持ち出せます。IAM だけでは持ち出しを防げません。"
+    d: "正解です。サービス境界の中のリソースから境界の外のプロジェクトへのコピーは、正規の認証情報を持つユーザーであってもブロックされます。IAM だけでは防げない持ち出しを防止できます。"
+    e: "Cloud NAT はインターネットへの出口を設ける仕組みで、要件に反します。Google API へのアクセスには、限定公開の Google アクセスを使います。"
+  explanation: |
+    この問題では、**ネットワークの経路の制御** と **データの持ち出し防止** という異なる要件を、それぞれに合った機能で満たします。
+
+    | 機能 | 役割 |
+    | --- | --- |
+    | 限定公開の Google アクセス | 外部 IP アドレスを持たない VM から、BigQuery や Cloud Storage などの Google API にアクセスできるようにする。サブネット単位で有効にする |
+    | VPC Service Controls | サービス境界を作り、境界をまたぐ API 経由のデータの移動をブロックする |
+    | IAM | 誰がどのリソースに何をできるかを制御する。正規の権限を持つ人による持ち出しは防げない |
+
+    - Dataflow のワーカーの外部 IP アドレスは、Java では `--usePublicIps=false`、Python では `--no_use_public_ips` で無効にします。このとき、ワーカーが使うサブネットで限定公開の Google アクセスを有効にしておく必要があります。
+    - 境界の外との正当なデータのやり取りが必要な場合は、VPC Service Controls の上り（ingress）ルールと下り（egress）ルールで個別に許可します。
+    - 外部のパッケージのダウンロードなど、インターネットへのアクセスがどうしても必要な場合にだけ Cloud NAT を検討します。
+  diagram: |
+    flowchart TD
+      subgraph P["VPC Service Controls のサービス境界"]
+        W["Dataflow ワーカー<br/>内部 IP アドレスのみ"]
+        GCS["Cloud Storage<br/>診療記録"]
+        BQ["BigQuery"]
+      end
+      W -->|限定公開の Google アクセス| GCS
+      W -->|限定公開の Google アクセス| BQ
+      BQ -.->|コピーを拒否| EXT["組織外のプロジェクト"]
+  references:
+    - title: "VPC Service Controls の概要"
+      url: "https://docs.cloud.google.com/vpc-service-controls/docs/overview"
+    - title: "インターネット アクセスとファイアウォール ルールを構成する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/routes-firewall"
+    - title: "限定公開の Google アクセスの構成"
+      url: "https://docs.cloud.google.com/vpc/docs/configure-private-google-access"
+
+- id: design-security-023
+  domain: design
+  services: [monitoring, cloud-storage, bigquery]
+  type: multiple
+  question: |
+    ある製薬会社は、治験データを Cloud Storage のバケットと BigQuery のデータセットに保存しています。規制当局の査察に備えて、次の要件を満たす必要があります。
+
+    - 治験データのファイルを誰がいつ読み取ったか、BigQuery のテーブルを誰がいつ参照したかを記録する
+    - 記録を5年間保持し、各プロジェクトのオーナーであっても期間内に削除できないようにする
+    - 複数のプロジェクトの記録を、監査チームが1か所で確認できるようにする
+
+    監査ログの設定は既定のままです。追加で必要な対応はどれですか？
+  choices:
+    a: "治験データのバケットでオブジェクトのバージョニングを有効にし、オブジェクトの過去の世代を5年間保持する"
+    b: "治験データを扱うプロジェクトで、Cloud Storage のデータアクセス監査ログ（`DATA_READ`）を有効にする"
+    c: "BigQuery の `INFORMATION_SCHEMA.JOBS` ビューの内容を毎日コピーし、各プロジェクトの BigQuery テーブルに5年間保存する"
+    d: "各プロジェクトの `_Default` ログバケットの保持期間を5年に延長し、監査チームに各プロジェクトのログの閲覧権限を付与する"
+    e: "組織レベルの集約シンクで監査ログを監査専用プロジェクトのログバケットに転送し、そのバケットの保持期間を5年に設定してロックする"
+  answer: [b, e]
+  choiceNotes:
+    a: "バージョニングはオブジェクトの過去の世代を残す機能で、誰がいつ読み取ったかは記録されません。"
+    b: "正解です。データアクセス監査ログは BigQuery を除いて既定で無効なため、Cloud Storage のオブジェクトの読み取りを記録するには明示的に有効にする必要があります。BigQuery のデータアクセス監査ログは既定で記録されます。"
+    c: "BigQuery のジョブの情報しか得られず、Cloud Storage の読み取りは記録できません。各プロジェクトに保存するため、プロジェクトのオーナーが削除できてしまいます。"
+    d: "記録が各プロジェクトに分散し、1か所で確認するという要件を満たしません。保持期間をロックしていないため、プロジェクトのオーナーが保持期間を短くできます。"
+    e: "正解です。組織レベルの集約シンクを使うと、配下のすべてのプロジェクトの監査ログを1か所に集められます。ログバケットの保持期間をロックすると、期間が過ぎるまでログを削除できず、保持期間を短くすることもできません。"
+  explanation: |
+    Cloud Audit Logs には、次の種類があります。
+
+    | 種類 | 記録する内容 | 既定の状態 |
+    | --- | --- | --- |
+    | 管理アクティビティ | リソースの作成や設定の変更などの操作 | 常に記録される（無効にできない） |
+    | データアクセス | データやメタデータの読み取り、データの書き込み | BigQuery を除いて無効。サービスごとに有効にする |
+    | システムイベント | Google のシステムによるリソースの変更 | 常に記録される |
+    | ポリシー拒否 | セキュリティポリシーによるアクセスの拒否 | 既定で記録される |
+
+    - データアクセス監査ログには `ADMIN_READ`、`DATA_READ`、`DATA_WRITE` の種類があります。ログの量が多くなるため、必要なサービスとプロジェクトに絞って有効にします。組織やフォルダで有効にすると、配下のプロジェクトにまとめて適用できます。
+    - 監査ログを改ざんや削除から守るには、ログを専用のプロジェクトに集約し、そのプロジェクトの権限を監査チームに限定します。
+    - ログバケットの保持期間をロックすると、保持期間の短縮やバケットの削除ができなくなります。ロックは取り消せないため、期間を確認してからロックします。
+    - 長期保存したログを SQL で分析したい場合は、ログバケットで Log Analytics を使うか、BigQuery にも転送します。
+  references:
+    - title: "Cloud Audit Logs の概要"
+      url: "https://docs.cloud.google.com/logging/docs/audit"
+    - title: "データアクセス監査ログを有効にする"
+      url: "https://docs.cloud.google.com/logging/docs/audit/configure-data-access"
+
+- id: design-security-024
+  domain: design
+  services: [cloud-storage, iam, monitoring]
+  type: single
+  question: |
+    ある証券会社は、顧客との取引記録のファイルを Cloud Storage に保存しています。金融規制により、記録は作成から7年間、WORM（一度書き込んだら変更も削除もできない状態）で保管しなければなりません。システム管理者を含めて誰も期間内に削除や上書きができないことを、監査で証明する必要があります。
+
+    どうすればよいですか？
+  choices:
+    a: "バケットでオブジェクトのバージョニングを有効にし、ライフサイクルルールで7年が過ぎた世代を削除する"
+    b: "バケットに7年間の保持ポリシーを設定し、バケットロックでその保持ポリシーをロックする"
+    c: "オブジェクトの削除権限を持つユーザーを IAM で限定し、Cloud Audit Logs で削除の操作を監視する"
+    d: "バケットに7年間の保持ポリシーを設定し、ポリシーを変更できるユーザーを IAM でセキュリティ管理者だけに限定する"
+  answer: [b]
+  choiceNotes:
+    a: "権限を持つユーザーは、過去の世代を含めてオブジェクトを削除できます。WORM の要件を満たしません。"
+    b: "正解です。保持ポリシーをロックすると、保持ポリシーの削除や期間の短縮ができなくなり、期間が過ぎるまでは誰もオブジェクトを削除・上書きできません。ロックは元に戻せないため、WORM の要件を満たせます。"
+    c: "削除の操作を検知できても、権限を持つ管理者による削除そのものは防げません。"
+    d: "ロックしていない保持ポリシーは、権限を持つユーザーが削除したり期間を短くしたりできます。管理者を含めて誰も削除できないという要件を満たしません。"
+  explanation: |
+    Cloud Storage で WORM を実現するには、**保持ポリシー** と **バケットロック** を使います。
+
+    | 機能 | 内容 |
+    | --- | --- |
+    | 保持ポリシー | バケット内のオブジェクトを、指定した期間が過ぎるまで削除・上書きできないようにする |
+    | バケットロック（保持ポリシーのロック） | 保持ポリシーの削除や期間の短縮をできなくする。ロックは元に戻せない |
+    | オブジェクトの保留（一時的な保留・イベントベースの保留） | 保留を解除するまで、個々のオブジェクトを削除できないようにする |
+
+    - ロックした保持ポリシーの期間は、延ばすことはできても短くすることはできません。
+    - 保持期間が過ぎていないオブジェクトが残っているバケットは削除できません。
+    - ロックは取り消せないため、期間を誤ると不要になったデータも削除できなくなります。設定内容を十分に確認してからロックします。
+    - 長期間保管するデータは、ライフサイクルルールで Archive などの低コストのストレージクラスに移すと、保存コストを抑えられます。
+  references:
+    - title: "保持ポリシーと保持ポリシーのロック"
+      url: "https://docs.cloud.google.com/storage/docs/bucket-lock"
+
+- id: design-security-025
+  domain: design
+  services: [bigquery, iam, dataflow]
+  type: single
+  question: |
+    あるフードデリバリー企業は、データ分析基盤を新たに設計しています。注文システムや会員システムから取り込む生データには、氏名、住所、電話番号などの個人情報が含まれます。生データは Dataflow のパイプラインで加工し、個人情報を除いた加工済みのデータをアナリストが分析します。要件は次のとおりです。
+
+    - 生データにアクセスできるのは、パイプラインのサービスアカウントと一部のデータエンジニアだけに限る
+    - アナリストは加工済みのデータだけを、担当する領域のデータセット単位で参照する
+    - 生データと加工済みのデータで、異なる組織ポリシーや監査の設定を適用しやすくする
+
+    どの構成が最も適切ですか？
+  choices:
+    a: "生データ用と加工済みデータ用でプロジェクトを分け、アナリストには加工済みデータのプロジェクトのデータセット単位で閲覧ロールを付与する"
+    b: "1つのプロジェクトに生データと加工済みデータのデータセットを作成し、アナリストにはプロジェクト単位で `roles/bigquery.dataViewer` を付与する"
+    c: "生データと加工済みデータを同じテーブルに格納し、行アクセスポリシーでアナリストには加工済みの行だけが返されるようにする"
+    d: "部署ごとにプロジェクトを作成し、各部署が必要な生データを自分のプロジェクトにコピーして、それぞれのプロジェクトで加工する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。プロジェクトを分けると、生データのプロジェクトのアクセス権、組織ポリシー、監査ログの設定などを、加工済みのプロジェクトとは独立して管理できます。アナリストには必要なデータセットだけの閲覧権限を付与します。"
+    b: "プロジェクト単位の閲覧権限では、生データのデータセットもアナリストから見えてしまいます。"
+    c: "構造の異なるデータを1つのテーブルに混在させることになり、個人情報の列もテーブルに残ります。生データと加工済みデータで異なる設定を適用することもできません。"
+    d: "個人情報を含む生データの複製が部署ごとに増え、アクセスの管理と監査が難しくなります。"
+  explanation: |
+    ガバナンスを考慮したデータ基盤では、**データの段階と機密度に応じてリソースを分ける** のが基本です。
+
+    | 単位 | 分け方の例 | 主な目的 |
+    | --- | --- | --- |
+    | フォルダ | 本番と開発、事業部 | 組織ポリシーや権限をまとめて継承させる |
+    | プロジェクト | 生データ（ランディング）、加工済み、分析用 | アクセス権、組織ポリシー、監査ログ、課金を分離する |
+    | データセット | 領域（売上、会員など）ごと | アナリストへの権限をデータセット単位で付与する |
+
+    - 生データのプロジェクトには、VPC Service Controls の境界やデータアクセス監査ログなど、より厳しい設定を適用しやすくなります。
+    - パイプラインは生データのプロジェクトから読み取り、加工済みのプロジェクトに書き込みます。両方のプロジェクトにまたがる権限は、パイプライン専用のサービスアカウントにだけ付与します。
+    - データセットやテーブルに `env` や `data_domain` などのラベルを付けておくと、リソースの整理や検索に役立ちます。条件付きのアクセス制御に使いたい場合は、IAM Conditions や組織ポリシーの条件に使えるタグを使います。
+  diagram: |
+    flowchart TD
+      SRC["注文・会員システム"]
+      subgraph RP["生データ用プロジェクト"]
+        RAW["生データ<br/>個人情報を含む"]
+      end
+      DF["Dataflow<br/>専用のサービスアカウント"]
+      subgraph CP["加工済みデータ用プロジェクト"]
+        DS1["売上データセット"]
+        DS2["会員データセット"]
+      end
+      AN["アナリスト"]
+      SRC --> RAW
+      RAW --> DF
+      DF --> DS1
+      DF --> DS2
+      AN -->|データセット単位で閲覧| DS1
+  references:
+    - title: "IAM でリソースへのアクセスを制御する"
+      url: "https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam"
+    - title: "リソース階層"
+      url: "https://docs.cloud.google.com/resource-manager/docs/cloud-platform-resource-hierarchy"

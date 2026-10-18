@@ -1,0 +1,1018 @@
+- id: design-reliability-001
+  domain: design
+  services: [dataprep, dataflow, dataproc, bigquery]
+  type: single
+  question: |
+    ある保険会社のマーケティング部門では、代理店から毎週届く CSV ファイル（数 GB）を Cloud Storage に保存し、BigQuery で分析しています。ファイルには日付形式の揺れ、欠損値、表記の異なる都道府県名などが含まれています。クレンジングを担当するのは業務部門のアナリストで、SQL やプログラミングの経験はありません。アナリストがデータの分布や異常値を画面で確認しながら変換の手順を作り、その手順を毎週自動で実行したいと考えています。サーバーやクラスタの管理は避けたいとしています。
+
+    どのサービスを使うべきですか？
+  choices:
+    a: "Dataprep でデータのプロファイルを確認しながらレシピを作成し、BigQuery に出力するジョブを毎週スケジュール実行する"
+    b: "Apache Beam の Python SDK でクレンジング処理を実装し、Dataflow のバッチジョブとして毎週実行する"
+    c: "Dataproc クラスタで PySpark のクレンジング処理を実装し、Cloud Composer から毎週実行する"
+    d: "CSV をそのまま BigQuery に読み込み、クレンジング用の SQL をスケジュールされたクエリとして毎週実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataprep は、データのサンプルを見ながら値の分布や異常値を確認し、提案される変換を選んでレシピを作れるコード不要のサービスです。レシピはジョブとしてスケジュール実行でき、処理は Dataflow などで実行されるため、インフラの管理も不要です。"
+    b: "Dataflow はサーバーレスですが、変換処理をコードで書く必要があります。プログラミングの経験がないアナリストが担当するという条件に合いません。"
+    c: "PySpark のコードを書く必要があるうえ、Dataproc クラスタの管理も発生します。コード不要とインフラ管理不要の両方の要件に反します。"
+    d: "スケジュールされたクエリは運用が簡単ですが、クレンジングを SQL で書く必要があります。SQL の経験がないアナリストには使えず、画面でデータを確認しながら手順を作ることもできません。"
+  explanation: |
+    データの準備・クレンジングのツールは、**誰が作業するか** と **データがどこにあるか** で選びます。
+
+    | ツール | 主な利用者 | 特徴 |
+    | --- | --- | --- |
+    | Dataprep | 業務部門のアナリスト | コード不要。データを見ながら対話的にクレンジングし、レシピを作る |
+    | Cloud Data Fusion | ETL 開発者 | GUI でパイプラインを組み立てる。豊富なコネクタで多様なソースを統合する |
+    | Dataform | SQL に慣れたエンジニア | BigQuery 内の SQL 変換を Git で管理し、依存関係とテストを扱う |
+    | Dataflow | 開発者 | Apache Beam のコードで、バッチとストリーミングの複雑な変換を行う |
+    | BigQuery の SQL | SQL を書ける人 | データが BigQuery にあれば、追加のサービスなしで変換できる |
+
+    試験では「プログラミングなしで」「ビジュアルに」「業務ユーザーが」といった条件があれば、Dataprep が候補になります。Dataprep はパートナー企業（Trifacta、現在の Alteryx）が提供するサービスで、作成したレシピは Dataflow などで実行されます。
+
+    なお、BigQuery Studio には、Gemini が変換を提案する **BigQuery data preparation** という機能もあり、BigQuery 内のデータをコードなしで準備できます。
+  references:
+    - title: "BigQuery data preparation overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/data-prep-introduction"
+
+- id: design-reliability-002
+  domain: design
+  services: [bigquery, data-fusion, dataflow, dataproc]
+  type: single
+  question: |
+    ある不動産会社のデータアナリストは、物件情報のデータ（約 5,000 万行）を BigQuery のテーブルに読み込みました。データには、数値の列に文字列が混ざっている、値の前後に空白がある、同じ物件が重複して登録されている、などの問題があります。アナリストは SQL に慣れており、このデータを整えたテーブルを月に1回作り直して分析に使いたいと考えています。新しいサービスの導入や、インフラの費用の追加は避けたいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "SAFE_CAST、TRIM、QUALIFY と ROW_NUMBER などを使ったクエリで整えたテーブルを作成し、スケジュールされたクエリで月に1回実行する"
+    b: "Cloud Data Fusion のインスタンスを作成し、Wrangler でクレンジングするパイプラインを月に1回実行する"
+    c: "Apache Beam でクレンジング処理を実装し、BigQuery から読み込んで書き戻す Dataflow のバッチジョブを月に1回実行する"
+    d: "Dataproc クラスタを作成し、Spark SQL でクレンジングして BigQuery に書き戻すジョブを月に1回実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。データがすでに BigQuery にあり、SQL で書けるクレンジングであれば、BigQuery の SQL だけで完結できます。SAFE_CAST は変換できない値を NULL にし、QUALIFY と ROW_NUMBER で重複を除けます。定期実行もスケジュールされたクエリでできます。"
+    b: "Data Fusion のインスタンスの費用がかかり、新しいサービスの導入も必要です。BigQuery 内のデータを SQL で整えるだけなら過剰です。"
+    c: "パイプラインのコードの開発と保守が必要で、データを BigQuery の外に読み出す処理も増えます。SQL で書ける処理に対しては過剰です。"
+    d: "クラスタの作成と管理が必要で、新しいサービスの導入とインフラの費用の追加を避けたいという要件に反します。"
+  explanation: |
+    データがすでに BigQuery にあるなら、まず **BigQuery の SQL で済ませられないか** を考えます（ELT の考え方）。
+
+    ```sql
+    CREATE OR REPLACE TABLE realestate.properties_clean AS
+    SELECT
+      property_id,
+      TRIM(name) AS name,
+      SAFE_CAST(price AS INT64) AS price,
+      updated_at
+    FROM realestate.properties_raw
+    WHERE TRUE
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY property_id ORDER BY updated_at DESC) = 1;
+    ```
+
+    データの準備・クレンジングのツールは、次のように選びます。
+
+    | 状況 | 選ぶツール |
+    | --- | --- |
+    | データが BigQuery にあり、SQL で書ける | BigQuery の SQL（依存関係の管理やテストが必要なら Dataform） |
+    | コードを書かずに、データを見ながら対話的に整えたい | Dataprep |
+    | 多様なソースを GUI でつないで統合したい | Cloud Data Fusion |
+    | ストリーミング、複雑な処理、大規模なデータ | Dataflow |
+    | 既存の Spark のコードを生かしたい | Dataproc |
+  references:
+    - title: "クエリのスケジューリング"
+      url: "https://docs.cloud.google.com/bigquery/docs/scheduling-queries"
+    - title: "変換関数"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/conversion_functions"
+
+- id: design-reliability-003
+  domain: design
+  services: [composer, bigquery, monitoring]
+  type: single
+  question: |
+    ある物流企業は、Cloud Composer の DAG で、取引先から届くファイルを毎朝 BigQuery に読み込み、集計テーブルを更新しています。先日、取引先のシステム障害で中身が空のファイルが届きましたが、DAG のタスクはすべて成功と表示され、前日と比べて大幅に件数の少ない集計結果が経営レポートに使われてしまいました。タスクの成功・失敗だけでなく、データそのものの異常にも早く気付けるように、パイプラインを設計し直したいと考えています。
+
+    最も適切な対応はどれですか？
+  choices:
+    a: "読み込みの後に BigQueryCheckOperator などでデータを検証するタスクを追加し、件数や日付が条件を満たさなければ後続のタスクを止めて担当者に通知する"
+    b: "タスクの再試行回数を増やし、一時的なエラーが起きてもタスクが最後まで成功しやすくなるようにする"
+    c: "毎朝担当者が経営レポートを開き、前日の数値と比べておかしな点がないかを目で確認する"
+    d: "DAG の実行時間を Cloud Monitoring で監視し、通常より長くかかった場合にアラートを出す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Airflow のデータ チェック用のオペレーターで、行数が0でないか、前日と比べて件数が大きく変わっていないか、最新の日付が当日かなどを検証できます。条件を満たさないとタスクが失敗するため、異常なデータが集計やレポートに進む前に止めて通知できます。"
+    b: "空のファイルの読み込みはエラーにならないため、再試行の回数を増やしても異常は検知できません。"
+    c: "手作業の確認は見落としや遅れが起きやすく、異常なデータが集計に使われた後でしか気付けません。"
+    d: "空のファイルはむしろ短時間で処理が終わるため、実行時間の監視では検知できません。"
+  explanation: |
+    パイプラインの監視は、**ジョブが動いたか** だけでなく **データが正しいか** も対象にして設計します。
+
+    | 監視の対象 | 例 | 手段の例 |
+    | --- | --- | --- |
+    | ジョブ | タスクの失敗、実行時間 | Airflow のアラート、Cloud Monitoring |
+    | データの鮮度 | 最新のデータが当日分か | チェック用のタスク、Dataplex の自動データ品質 |
+    | データの量 | 行数が0、前日比で大きな増減 | BigQueryCheckOperator、BigQueryIntervalCheckOperator |
+    | データの値 | NULL、範囲外の値、重複 | Dataplex の自動データ品質、Dataform のアサーション |
+
+    検証のタスクを読み込みと集計の間に置くと、異常なデータが下流のテーブルやレポートに広がる前に止められます。
+  references:
+    - title: "Airflow DAG を作成する"
+      url: "https://docs.cloud.google.com/composer/docs/composer-3/write-dags"
+    - title: "自動データ品質の概要"
+      url: "https://docs.cloud.google.com/dataplex/docs/auto-data-quality-overview"
+
+- id: design-reliability-004
+  domain: design
+  services: [bigquery, cloud-storage]
+  type: single
+  question: |
+    ある電力会社は、東京リージョン（asia-northeast1）の BigQuery で電力の需要予測と設備の分析を行っています。社内の規程により、データは国内に保存する必要があります。東京リージョン全体が利用できなくなった場合でも、大阪リージョン（asia-northeast2）で短時間のうちにクエリと書き込みを再開できるようにしたいと考えています。また、平常時に待機用のスロットを別途購入することは避けたいとしています。
+
+    どの構成にすべきですか？
+  choices:
+    a: "Enterprise Plus エディションで大阪をセカンダリとするフェイルオーバー予約を構成し、クロスリージョン レプリケーションを設定したデータセットをその予約に割り当てる"
+    b: "データセットのクロスリージョン レプリケーションだけを構成し、東京リージョンの障害時は大阪のセカンダリ レプリカをプライマリに昇格する"
+    c: "毎晩テーブルを Cloud Storage にエクスポートして大阪リージョンのバケットにコピーし、障害時は大阪のデータセットに読み込み直す"
+    d: "データセットのタイムトラベル期間を最大の7日間に設定し、障害時は過去の時点のテーブルを復元する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。マネージド障害復旧（managed disaster recovery）では、レプリケーションしたデータセットと予約のコンピューティング容量を、まとめてセカンダリ リージョンにフェイルオーバーできます。プライマリ リージョンが利用できなくてもフェイルオーバーでき、待機容量は Enterprise Plus の予約に含まれます。"
+    b: "クロスリージョン レプリケーションが複製するのはストレージだけで、プライマリ リージョンが利用できないときはセカンダリ レプリカを昇格できません。リージョン全体の障害には対応できません。"
+    c: "RPO が最大で約1日になり、障害時の読み込み直しにも時間がかかります。短時間で再開するという要件を満たせません。"
+    d: "タイムトラベルは、同じリージョン内での誤削除や誤更新から復旧するための機能です。リージョン全体の障害には役立ちません。"
+  explanation: |
+    BigQuery のリージョン障害への備えは、**ストレージ** と **コンピューティング（スロット）** の両方で考えます。
+
+    | 機能 | 複製されるもの | プライマリ リージョンの障害時 |
+    | --- | --- | --- |
+    | クロスリージョン データセット レプリケーション | ストレージ | セカンダリを昇格できない（計画的な切り替え向け） |
+    | マネージド障害復旧 | ストレージとコンピューティング | セカンダリにフェイルオーバーできる（Enterprise Plus が必要） |
+
+    - レプリケーションは非同期で、セカンダリ レプリカは読み取り専用です。
+    - フェイルオーバー予約に割り当てたデータセットには、その Enterprise Plus の予約からしか書き込めません。
+    - US や EU のマルチリージョンにデータセットを置いても、リージョン障害に備えた複製にはなりません。地理的な冗長性が必要なら、レプリケーションを明示的に構成します。
+  diagram: |
+    flowchart TD
+      subgraph P["東京（プライマリ）"]
+        R1["Enterprise Plus 予約"]
+        D1["データセット<br/>プライマリ レプリカ"]
+      end
+      subgraph S["大阪（セカンダリ）"]
+        R2["待機容量"]
+        D2["データセット<br/>セカンダリ レプリカ"]
+      end
+      D1 -->|非同期で複製| D2
+      R1 -.->|フェイルオーバー| R2
+  references:
+    - title: "Managed disaster recovery"
+      url: "https://docs.cloud.google.com/bigquery/docs/managed-disaster-recovery"
+    - title: "Cross-region dataset replication"
+      url: "https://docs.cloud.google.com/bigquery/docs/data-replication"
+
+- id: design-reliability-005
+  domain: design
+  services: [spanner, cloud-sql, bigtable, alloydb]
+  type: single
+  question: |
+    ある決済代行会社は、加盟店の取引を記録する台帳データベースを設計しています。台帳は数 TB のリレーショナル データで、取引の記録には ACID トランザクションが必要です。監査上の要件により、リージョン全体の障害が起きても確定済みの取引が1件も失われてはならず（RPO ゼロ）、人手を介さずに数分以内に処理を再開する必要があります。
+
+    どの構成を選ぶべきですか？
+  choices:
+    a: "Spanner のマルチリージョン構成のインスタンスを使用する"
+    b: "Cloud SQL for PostgreSQL を高可用性構成にし、別のリージョンにクロスリージョン リードレプリカを作成する"
+    c: "Bigtable のクラスタを2つのリージョンに配置し、マルチクラスタ ルーティングのアプリ プロファイルを使用する"
+    d: "AlloyDB for PostgreSQL のクラスタを作成し、別のリージョンにセカンダリ クラスタを作成する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Spanner のマルチリージョン構成では、書き込みは複数のリージョンにあるレプリカの過半数が合意してからコミットされる（同期レプリケーション）ため、1つのリージョンが停止しても確定済みの取引は失われません。障害時の切り替えも自動で行われます。"
+    b: "クロスリージョン リードレプリカへの複製は非同期のため、障害の直前の取引が失われる可能性があります。レプリカの昇格にも手動の操作が必要です。"
+    c: "Bigtable のクラスタ間のレプリケーションは非同期のため、リージョン障害の直前の書き込みが失われる可能性があります。複数行にまたがる ACID トランザクションにも対応していません。"
+    d: "AlloyDB のセカンダリ クラスタへの複製は非同期のため、RPO ゼロにはなりません。リージョン障害のときは、セカンダリ クラスタを昇格する操作が必要です。"
+  explanation: |
+    リージョン障害時の RPO は、**リージョン間の複製が同期か非同期か** で決まります。
+
+    | 構成 | リージョン間の複製 | リージョン障害時のデータ損失 | 切り替え |
+    | --- | --- | --- | --- |
+    | Spanner のマルチリージョン構成 | 同期（過半数の合意） | なし | 自動 |
+    | Cloud SQL のクロスリージョン レプリカ | 非同期 | 直前の更新を失う可能性あり | レプリカを昇格 |
+    | AlloyDB のセカンダリ クラスタ | 非同期 | 直前の更新を失う可能性あり | セカンダリを昇格 |
+    | Bigtable のマルチクラスタ ルーティング | 非同期 | 直前の更新を失う可能性あり | 自動 |
+
+    - 同期レプリケーションはデータの損失を防げる一方、リージョン間の通信の分だけ書き込みのレイテンシが大きくなります。
+    - RPO ゼロが必要か、数分程度の損失を許容できるかで、選べるサービスと費用が大きく変わります。要件を確認してから構成を決めます。
+  references:
+    - title: "リージョン、デュアルリージョン、マルチリージョンの構成"
+      url: "https://docs.cloud.google.com/spanner/docs/instance-configurations"
+    - title: "Spanner のレプリケーション"
+      url: "https://docs.cloud.google.com/spanner/docs/replication"
+
+- id: design-reliability-006
+  domain: design
+  services: [cloud-sql, spanner]
+  type: single
+  question: |
+    ある製造業の企業は、受注管理システムのデータベースとして Cloud SQL for PostgreSQL を1つのゾーンで運用しています。次の要件を満たすように構成を見直したいと考えています。
+
+    - ゾーン障害のときは、データを失わずに自動で短時間のうちに復旧する
+    - リージョン全体の障害のときは、数分程度のデータ損失は許容し、数時間以内に別のリージョンで業務を再開する
+    - アプリケーションの変更は最小限にする
+
+    どの構成にすべきですか？
+  choices:
+    a: "インスタンスを高可用性（リージョン）構成にし、別のリージョンにクロスリージョン リードレプリカを作成する"
+    b: "インスタンスを高可用性（リージョン）構成にし、プライマリとスタンバイを同じリージョンの別々のゾーンに配置する"
+    c: "同じリージョンの別々のゾーンに2つのリードレプリカを作成し、障害時はどちらかをプライマリに昇格する"
+    d: "データベースを Spanner のマルチリージョン構成に移行し、アプリケーションを Spanner 向けに書き換える"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。高可用性構成ではスタンバイへ同期的に複製されるため、ゾーン障害時にデータを失わずに自動でフェイルオーバーします。リージョン障害には、非同期で複製されるクロスリージョン リードレプリカを昇格して対応できます。"
+    b: "高可用性構成のプライマリとスタンバイは同じリージョン内にあるため、ゾーン障害には対応できますが、リージョン全体の障害には対応できません。"
+    c: "リードレプリカは非同期で複製されるため、昇格すると直近の更新を失う可能性があり、自動フェイルオーバーもしません。同じリージョン内にあるので、リージョン障害にも対応できません。"
+    d: "要件は満たせますが、データベースの移行とアプリケーションの書き換えが必要で、変更を最小限にするという要件に反します。"
+  explanation: |
+    障害の範囲ごとに、RPO と RTO を満たす仕組みを組み合わせます。
+
+    | 仕組み | 対象の障害 | 切り替え | データ損失 |
+    | --- | --- | --- | --- |
+    | 高可用性（リージョン）構成 | ゾーン障害 | 自動フェイルオーバー | なし（同期レプリケーション） |
+    | クロスリージョン リードレプリカ | リージョン障害 | レプリカを昇格 | 直近の更新を失う可能性あり（非同期） |
+    | バックアップ、ポイントインタイム リカバリ | 誤操作、データ破損 | 新しいインスタンスに復元 | 復元する時点による |
+
+    - 高可用性構成は **同じリージョン内** の冗長化です。リージョン障害への備えにはなりません。
+    - リードレプリカは読み取りの負荷分散にも使えますが、自動ではフェイルオーバーしません。
+    - 強い整合性のままリージョン障害でも自動で継続したい場合は Spanner のマルチリージョン構成を検討しますが、移行とアプリケーションの変更が必要です。
+  diagram: |
+    flowchart TD
+      App["受注管理アプリ"] --> P
+      subgraph RA["リージョン A"]
+        P["プライマリ<br/>ゾーン 1"] -->|同期| SB["スタンバイ<br/>ゾーン 2"]
+      end
+      subgraph RB["リージョン B"]
+        RR["クロスリージョン<br/>リードレプリカ"]
+      end
+      P -->|非同期| RR
+  references:
+    - title: "高可用性について"
+      url: "https://docs.cloud.google.com/sql/docs/postgres/high-availability"
+    - title: "クロスリージョン レプリカ"
+      url: "https://docs.cloud.google.com/sql/docs/postgres/replication/cross-region-replicas"
+
+- id: design-reliability-007
+  domain: design
+  services: [bigquery, cloud-sql]
+  type: single
+  question: |
+    ある証券会社は、BigQuery で約定データを管理しています。毎晩のバッチ処理では、当日の約定を明細テーブルに挿入し、その内容を口座ごとの残高テーブルにも反映しています。先日、明細テーブルへの挿入の後に残高テーブルの更新が失敗し、2つのテーブルの内容が食い違ったまま翌朝のレポートに使われてしまいました。データは BigQuery に置いたまま、2つのテーブルの更新がすべて成功するか、すべて取り消されるようにしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "2つのテーブルへの DML を BEGIN TRANSACTION と COMMIT TRANSACTION で囲み、マルチステートメント トランザクションとして実行する"
+    b: "2つの DML を別々のジョブとして実行し、2つ目のジョブが失敗したときは自動で再試行されるように設定する"
+    c: "更新の前に2つのテーブルのスナップショットを作成し、失敗したときは担当者がスナップショットから復元する"
+    d: "明細テーブルと残高テーブルを Cloud SQL に移し、Cloud SQL のトランザクションで更新してから BigQuery に連携する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。BigQuery のマルチステートメント トランザクションでは、複数のテーブルに対する DML をまとめてコミットできます。コミットされるまで変更はほかのクエリから見えず、エラー時はロールバックしてどちらの変更も反映しないようにできます。"
+    b: "2つ目が成功するまでの間、2つのテーブルが食い違った状態がレポートから見えてしまいます。再試行でも失敗し続ければ、不整合が残ります。"
+    c: "復元するまでの間は不整合な状態が見え、手作業の復旧も必要です。すべて成功するかすべて取り消されるという要件を満たせません。"
+    d: "データを BigQuery に置いたままにするという要件に反し、システムも複雑になります。BigQuery 自体がトランザクションに対応しているため、移す必要はありません。"
+  explanation: |
+    BigQuery は分析用のデータウェアハウスですが、**マルチステートメント トランザクション** で複数のテーブルを ACID に沿って更新できます。
+
+    ```sql
+    BEGIN
+      BEGIN TRANSACTION;
+      INSERT INTO trading.executions SELECT * FROM staging.today_executions;
+      UPDATE trading.balances b
+      SET amount = b.amount + d.delta
+      FROM staging.today_deltas d
+      WHERE b.account_id = d.account_id;
+      COMMIT TRANSACTION;
+    EXCEPTION WHEN ERROR THEN
+      ROLLBACK TRANSACTION;
+      RAISE USING MESSAGE = @@error.message;
+    END;
+    ```
+
+    - トランザクション内のクエリは、開始時点のスナップショットを読み取ります（スナップショット分離）。
+    - コミットされるまで、変更はほかのクエリから見えません。
+
+    各サービスのトランザクションの範囲は、次のように整理できます。
+
+    | サービス | トランザクションの範囲 |
+    | --- | --- |
+    | Spanner | 複数の行・テーブル・リージョンにまたがる ACID |
+    | Cloud SQL、AlloyDB | 1つのデータベース内の ACID |
+    | BigQuery | マルチステートメント トランザクション（分析向け） |
+    | Bigtable | 単一行のみ |
+  references:
+    - title: "マルチステートメント トランザクション"
+      url: "https://docs.cloud.google.com/bigquery/docs/transactions"
+    - title: "GoogleSQL のデータ操作言語（DML）ステートメント"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax"
+
+- id: design-reliability-008
+  domain: design
+  services: [bigtable]
+  type: single
+  question: |
+    あるゲーム会社は、プレイヤーのプロフィールと行動履歴を Bigtable に保存しています。インスタンスは東京と大阪のリージョンにクラスタを持ち、アプリ プロファイルはマルチクラスタ ルーティングを使用して、障害時には自動でフェイルオーバーしています。新たに、ゲーム内通貨の残高を ReadModifyWrite（インクリメント）で更新する機能を追加することになりました。この処理では、書き込んだ値を直後に必ず読み取れる必要があります。既存の機能の可用性は維持し、アプリケーションの変更は最小限にしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "通貨の更新用に、単一クラスタ ルーティングで単一行トランザクションを許可したアプリ プロファイルを新しく作成し、その処理だけで使用する"
+    b: "既存のマルチクラスタ ルーティングのアプリ プロファイルで単一行トランザクションを許可し、すべての処理で使用する"
+    c: "すべてのアプリ プロファイルを単一クラスタ ルーティングに変更し、障害時は手動でもう一方のクラスタに切り替える"
+    d: "両方のクラスタのノード数を増やしてレプリケーションの遅延を小さくし、通貨の更新もマルチクラスタ ルーティングで行う"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ReadModifyWrite などの単一行トランザクションは、単一クラスタ ルーティングのアプリ プロファイルでのみ許可できます。ワークロードごとにアプリ プロファイルを分ければ、通貨の更新は1つのクラスタで read-your-writes の整合性を得られ、既存の機能はマルチクラスタ ルーティングの可用性を保てます。"
+    b: "マルチクラスタ ルーティングのアプリ プロファイルでは、単一行トランザクションを許可できません。複数のクラスタが同じ行への更新を受け付けると、更新が失われるおそれがあるためです。"
+    c: "単一クラスタ ルーティングでは自動フェイルオーバーが行われないため、既存の機能の可用性が下がります。"
+    d: "ノードを増やしてもレプリケーションは結果整合性のままで、書き込んだ値を直後に読み取れる保証にはなりません。単一行トランザクションも使えません。"
+  explanation: |
+    Bigtable のレプリケーションでは、**アプリ プロファイルのルーティング** で整合性と可用性のバランスを選びます。
+
+    | ルーティング | 整合性 | フェイルオーバー | 単一行トランザクション |
+    | --- | --- | --- | --- |
+    | マルチクラスタ | 結果整合性 | 自動（最も近い利用可能なクラスタへ） | 許可できない |
+    | 単一クラスタ | read-your-writes（同じクラスタに送る場合） | 手動（アプリ プロファイルを変更） | 許可できる |
+
+    - 1つのインスタンスに複数のアプリ プロファイルを作り、ワークロードごとに使い分けられます。
+    - Bigtable のトランザクションは単一行だけです。複数の行にまたがる ACID トランザクションが必要なら、Spanner を検討します。
+  references:
+    - title: "Replication overview"
+      url: "https://docs.cloud.google.com/bigtable/docs/replication-overview"
+    - title: "Routing options"
+      url: "https://docs.cloud.google.com/bigtable/docs/routing"
+
+- id: design-reliability-009
+  domain: design
+  services: [dataplex, bigquery, dataform]
+  type: single
+  question: |
+    ある保険会社では、複数の部門が Dataflow、Cloud Data Fusion、手動のアップロードなど、それぞれ異なる方法で BigQuery にデータを読み込んでいます。データガバナンス チームは、既存の読み込み処理を変更せずに、主要なテーブルに対して「契約番号が NULL でない」「保険料が 0 以上」「契約番号が一意」といったルールを定期的にチェックしたいと考えています。チェックの結果は、データを利用する人がテーブルのメタデータと一緒に確認できるようにしたいとしています。運用の手間は最小限にしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Dataplex の自動データ品質でテーブルごとにデータ品質スキャンを作成し、ルールを定義してスケジュール実行する"
+    b: "各部門の読み込みパイプラインに検証のステップを追加し、ルールに違反した行を別のテーブルに出力する"
+    c: "Compute Engine の VM で検証用の Python スクリプトを cron で実行し、結果を Cloud Storage に保存する"
+    d: "Dataform のリポジトリを作成し、チェック対象のテーブルごとにルールを確認するアサーションの SQL を作成する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataplex の自動データ品質では、NULL、値の範囲、一意性などのルールをテーブルに定義し、データ品質スキャンとして定期実行できます。読み込み処理を変える必要はなく、結果はカタログや BigQuery のテーブルの画面に公開でき、BigQuery のテーブルにエクスポートすることもできます。"
+    b: "各部門のパイプラインの変更が必要で、既存の読み込み処理を変更しないという要件に反します。手動のアップロードには検証を組み込めません。"
+    c: "スクリプトと VM の保守が必要になり、運用の手間が増えます。結果をテーブルのメタデータと一緒に確認することもできません。"
+    d: "ルールのチェック自体はできますが、検証用の SQL とリポジトリを管理する必要があります。結果をテーブルのメタデータと一緒に利用者へ公開する用途には向いていません。"
+  explanation: |
+    データの検証は、**どこで行うか** によって方法が変わります。
+
+    | 検証する場所 | 方法の例 | 向いている場面 |
+    | --- | --- | --- |
+    | パイプラインの中 | Dataflow で不正なレコードを別の出力に分ける、Dataform のアサーション | 不正なデータを下流に流したくない |
+    | 保存後のテーブル | Dataplex の自動データ品質 | 読み込み方法がばらばらで、横断的に品質を監視したい |
+
+    Dataplex の自動データ品質の要点は次のとおりです。
+
+    - NULL チェック、範囲、値のセット、正規表現、一意性、SQL の条件などのルールを定義できる
+    - データ プロファイル スキャンの結果から、ルールの候補を推奨させることができる
+    - スキャンはオンデマンドまたはスケジュールで実行できる
+    - 結果をカタログや BigQuery の画面に公開したり、BigQuery のテーブルにエクスポートしてダッシュボードやアラートに使ったりできる
+
+    なお、Dataplex は Dataplex Universal Catalog を経て、2026年4月に **Knowledge Catalog** という名称に変わりました。試験ガイドでは Dataplex の名称が使われています。
+  references:
+    - title: "自動データ品質の概要"
+      url: "https://docs.cloud.google.com/dataplex/docs/auto-data-quality-overview"
+    - title: "Knowledge Catalog FAQ"
+      url: "https://docs.cloud.google.com/knowledge-catalog/docs/faq"
+
+- id: design-reliability-010
+  domain: design
+  services: [dataflow, dataproc, pubsub, migration]
+  type: single
+  question: |
+    ある広告配信企業は、広告の表示ログを1時間ごとに Cloud Storage に出力し、集計して BigQuery に書き込んでいます。現在はバッチ処理で十分ですが、1年以内に広告主向けのダッシュボードを数秒単位で更新するリアルタイム集計に移行する計画があります。その際、ログは Pub/Sub から受け取る予定です。将来の移行で集計ロジックを作り直さずに済むように、今の段階で処理基盤を選びたいと考えています。
+
+    どの方法を選ぶべきですか？
+  choices:
+    a: "Apache Beam で集計処理を実装して Dataflow のバッチジョブとして実行し、将来は入力を Pub/Sub に変えてストリーミング ジョブとして実行する"
+    b: "Dataproc で Hive のバッチジョブとして集計処理を実装し、将来はジョブの実行間隔を数秒に短くする"
+    c: "BigQuery Data Transfer Service で Cloud Storage のログを1時間ごとに読み込み、スケジュールされたクエリで集計する"
+    d: "Cloud Run jobs で集計用の Python スクリプトを1時間ごとに実行し、将来は常時実行のサービスとして作り直す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Apache Beam はバッチとストリーミングを同じプログラミング モデルで扱えるため、入力を Pub/Sub に変えてウィンドウ処理を加えれば、集計ロジックの多くをそのまま使えます。Dataflow はどちらのモードもサーバーレスで実行できます。"
+    b: "Hive はバッチ処理のエンジンで、実行間隔を短くしても数秒単位のリアルタイム集計にはなりません。ストリーミングに移行するときに作り直しが必要です。"
+    c: "BigQuery Data Transfer Service の読み込みは定期実行のバッチです。Pub/Sub からのストリーミング処理に移行するときは、取り込みと集計の仕組みを作り直す必要があります。"
+    d: "将来の作り直しを前提にした方法で、作り直しを避けたいという要件に反します。スケーリングや障害時の再処理も自前で実装する必要があります。"
+  explanation: |
+    アーキテクチャは、現在の要件だけでなく、**予定されている将来の要件** にも対応できるものを選びます。
+
+    - Apache Beam では、同じ変換（PTransform）を境界のあるデータ（バッチ）と境界のないデータ（ストリーミング）の両方に使えます。
+    - ストリーミングに移行するときは、ウィンドウ、ウォーターマーク、トリガー、遅延データの扱いを追加で設計します。
+    - Beam のパイプラインは Dataflow 以外のランナー（Apache Flink、Apache Spark など）でも実行でき、移植性の面でも有利です。
+
+    試験では「今はバッチだが将来はストリーミング」「同じコードで両方」といった条件があれば、Apache Beam と Dataflow が候補になります。
+  references:
+    - title: "Dataflow の概要"
+      url: "https://docs.cloud.google.com/dataflow/docs/overview"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: design-reliability-011
+  domain: design
+  services: [bigquery, biglake, migration]
+  type: single
+  question: |
+    ある消費財メーカーは、販売データを Google Cloud の BigQuery で分析しています。一方、EC サイトのクリックストリーム データ（数百 TB）は Amazon S3 に保存されており、AWS 側のチームも日常的に利用しています。データ転送の費用と二重管理を避けるため、このデータをすべて Google Cloud にコピーすることは避けたいと考えています。アナリストは、普段使っている BigQuery の SQL と画面でクリックストリーム データを分析し、その集計結果だけを販売データと組み合わせたいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "BigQuery Omni で AWS への接続を作成し、S3 のデータを参照する BigLake テーブルを AWS リージョンのデータセットに作成してクエリする"
+    b: "Storage Transfer Service で S3 のデータを毎日 Cloud Storage にコピーし、BigQuery の外部テーブルとしてクエリする"
+    c: "BigQuery Data Transfer Service で S3 のデータを毎日 BigQuery のテーブルに読み込み、販売データと結合する"
+    d: "Google Cloud のリージョンにあるデータセットに、S3 の URI を直接指定した外部テーブルを作成してクエリする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。BigQuery Omni を使うと、S3 のデータをコピーせずに BigQuery の SQL と画面でクエリできます。クエリは AWS リージョンで実行され、集計結果だけを Google Cloud のリージョンに転送して販売データと組み合わせられます。"
+    b: "すべてのデータを Google Cloud にコピーすることになり、方針に反します。転送の費用と、2つのクラウドでのデータの二重管理も発生します。"
+    c: "データを BigQuery にコピーする方法で、すべてのデータをコピーしないという方針に反します。"
+    d: "Google Cloud のリージョンにあるデータセットからは、S3 のデータを直接参照できません。S3 のデータは、BigQuery Omni の AWS リージョンのデータセットに作成した BigLake テーブルから参照します。"
+  explanation: |
+    マルチクラウドのデータを分析する方法は、**データを移動するかどうか** で選びます。
+
+    | 方法 | データの移動 | 向いている場面 |
+    | --- | --- | --- |
+    | BigQuery Omni | なし（集計結果だけ転送できる） | AWS や Azure のデータを、その場で BigQuery から分析したい |
+    | Storage Transfer Service | Cloud Storage にコピー | データを Google Cloud に移行・集約したい |
+    | BigQuery Data Transfer Service | BigQuery に読み込む | 定期的に BigQuery に取り込んで分析したい |
+
+    - BigQuery Omni では、Amazon S3 や Azure Blob Storage のデータを参照する BigLake テーブルを、AWS や Azure のリージョンのデータセットに作成します。
+    - 認証には BigQuery の接続（AWS の IAM ロールなど）を使います。
+    - クエリは AWS や Azure のリージョンで実行されるため、元のデータをクラウドの外に移さずに分析できます。
+  diagram: |
+    flowchart TD
+      U["アナリスト<br/>BigQuery の画面"] --> OM
+      subgraph AWS["AWS"]
+        S3["Amazon S3<br/>クリックストリーム"] --> OM["BigQuery Omni<br/>クエリを実行"]
+      end
+      subgraph GC["Google Cloud"]
+        BQ["BigQuery<br/>販売データ"]
+      end
+      OM -->|集計結果だけ転送| BQ
+  references:
+    - title: "BigQuery Omni の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/omni-introduction"
+
+- id: design-reliability-012
+  domain: design
+  services: [dataflow, cloud-storage, bigquery, biglake]
+  type: multiple
+  question: |
+    ある自動車メーカーは、データ分析基盤を Google Cloud に構築します。グループ会社では別のクラウドも使われており、経営方針として、将来は処理やデータの一部を別のクラウドやオンプレミスに移せるようにしておくことが求められています。一方、Google Cloud ではインフラの運用をできるだけ減らしたいと考えています。処理にはバッチとストリーミングの両方があります。
+
+    どの設計方針を組み合わせるべきですか？
+  choices:
+    a: "データは Parquet や Apache Iceberg などのオープンな形式で Cloud Storage に保存する"
+    b: "処理は Apache Beam で実装して Dataflow で実行し、必要になれば Apache Flink などの別のランナーでも動かせるようにする"
+    c: "処理はすべて BigQuery のストアド プロシージャとスケジュールされたクエリで実装し、データも BigQuery のネイティブ テーブルだけに保存する"
+    d: "処理は Compute Engine の VM 上で動く自作のプログラムとして実装し、各クラウドの VM に同じプログラムを配置する"
+    e: "将来の移行に備えて、すべてのデータを Google Cloud と別のクラウドの両方に常に複製しておく"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。オープンな形式で保存すれば、Spark、Flink、Trino、BigQuery など多くのエンジンから同じデータを読めるため、処理の環境を移してもデータを使い続けられます。"
+    b: "正解です。Apache Beam のパイプラインは、Dataflow 以外のランナー（Apache Flink、Apache Spark など）でも実行できます。Google Cloud ではマネージドな Dataflow で運用の手間を減らしながら、将来の移植性も確保できます。"
+    c: "運用の手間は少ないものの、処理とデータが BigQuery に依存するため、別の環境に移すときに作り直しが必要になります。"
+    d: "移植はしやすくなりますが、VM とプログラムの運用をすべて自社で行うことになり、インフラの運用を減らしたいという要件に反します。"
+    e: "常に複製を持つと、費用と管理の手間が大きくなります。将来に移せるようにしておくという要件には、オープンな形式と技術を選ぶことで対応できます。"
+  explanation: |
+    ポータビリティ（移植性）の設計では、**データの形式** と **処理の実装方法** の両方で、特定の環境への依存を減らします。
+
+    | 観点 | 移植しやすい選択 | 依存が強くなる選択 |
+    | --- | --- | --- |
+    | データ | Parquet、Avro、ORC、Apache Iceberg などのオープンな形式 | 特定のサービス独自の形式 |
+    | 処理 | Apache Beam、Apache Spark などのオープンソースのフレームワーク | 特定のサービス専用の機能だけで実装 |
+    | 運用 | オープンソースと互換性のあるマネージド サービス | 自前の VM での運用 |
+
+    - Google Cloud には、オープンソースと互換性のあるマネージド サービスが多くあります（Dataflow は Apache Beam、Dataproc は Apache Spark と Hadoop、Cloud Composer は Apache Airflow）。
+    - データを別のクラウドに置いたまま分析したい場合は BigQuery Omni、オープンな形式のデータに BigQuery と同じきめ細かいアクセス制御をかけたい場合は BigLake を使います。
+
+    試験では「ベンダーロックインを避けたい」「将来ほかの環境に移せるように」という条件と、「運用の手間を減らしたい」という条件を同時に満たす選択肢を選びます。
+  references:
+    - title: "BigLake 外部テーブルの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/biglake-intro"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: design-reliability-013
+  domain: design
+  services: [migration, alloydb]
+  type: single
+  question: |
+    ある航空会社は、予約システムのデータベースとしてオンプレミスの Oracle を使っています。ライセンス費用を削減するため、PostgreSQL 互換のマネージド データベースである AlloyDB for PostgreSQL に移行することにしました。テーブル定義に加えて、PL/SQL で書かれた多数のストアド プロシージャも変換する必要があります。切り替え時の停止時間は最小限にし、移行のためのツールは自作したくないと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Database Migration Service の変換ワークスペースでスキーマとコードを変換し、継続的な移行ジョブで変更を AlloyDB に反映し続けてから切り替える"
+    b: "BigQuery Migration Service のバッチ SQL 変換で PL/SQL を変換し、変換後のコードを AlloyDB に適用してからデータを移す"
+    c: "Oracle のデータベースを Bare Metal Solution に移し、Oracle のまま Google Cloud で運用を続ける"
+    d: "Oracle の全テーブルを CSV にエクスポートして AlloyDB に読み込み、ストアド プロシージャはアプリケーションのコードに書き直す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Database Migration Service は、Oracle から PostgreSQL 系のデータベースへの異種移行に対応しています。変換ワークスペースでスキーマや PL/SQL のコードを変換し、継続的な移行で初期コピーの後の変更も反映し続けるため、切り替え時の停止時間を短くできます。"
+    b: "BigQuery Migration Service の SQL 変換は、BigQuery の GoogleSQL に変換するための機能で、PostgreSQL 向けの変換には使えません。データの移し方も決まっていません。"
+    c: "Oracle を使い続けるため、ライセンス費用を削減するという目的を果たせません。"
+    d: "エクスポートの後の変更が反映されないため、長い停止時間が必要です。ストアド プロシージャの書き直しも大きな手作業になります。"
+  explanation: |
+    Database Migration Service は、移行元と移行先のデータベースの種類によって、2種類の移行を提供します。
+
+    | 移行の種類 | 例 | スキーマとコード |
+    | --- | --- | --- |
+    | 同種の移行 | MySQL から Cloud SQL for MySQL、PostgreSQL から AlloyDB | 変換は不要（ネイティブのレプリケーションを使う） |
+    | 異種の移行 | Oracle から Cloud SQL for PostgreSQL や AlloyDB | 変換ワークスペースで変換する |
+
+    - **変換ワークスペース**：テーブル、ビュー、ストアド プロシージャ、関数などを移行先の方言に変換します。自動で変換できなかった部分は、確認して手で修正します。
+    - **継続的な移行**：初期の全体コピーの後も変更データを反映し続け、切り替え時に移行先を昇格します。
+
+    データウェアハウスを BigQuery に移す場合は BigQuery Migration Service と BigQuery Data Transfer Service、業務データベースを Cloud SQL や AlloyDB に移す場合は Database Migration Service、と使い分けます。
+  references:
+    - title: "Database Migration Service の概要"
+      url: "https://docs.cloud.google.com/database-migration/docs/overview"
+    - title: "AlloyDB for PostgreSQL の概要"
+      url: "https://docs.cloud.google.com/alloydb/docs/overview"
+
+- id: design-reliability-014
+  domain: design
+  services: [bigquery, dataflow, cloud-storage]
+  type: single
+  question: |
+    あるグローバル小売企業は、日本と EU で EC サイトを運営しています。日本の顧客データは日本国内に、EU の顧客データは EU 域内に保存して処理する必要があります。一方、米国の本社にある経営ダッシュボードでは、両地域の売上を合わせた日次の KPI を表示したいと考えています。法務部門からは、個人を特定できない集計値であれば国外に移してよいと確認が取れています。
+
+    どのアーキテクチャにすべきですか？
+  choices:
+    a: "顧客データを東京リージョンと EU マルチリージョンのデータセットに地域ごとに保存して各地域で集計し、個人を含まない集計結果だけを本社用のデータセットに転送する"
+    b: "すべての顧客データを US マルチリージョンのデータセットに集約し、地域ごとに行レベルのアクセス ポリシーで参照できる行を制限する"
+    c: "すべての顧客データを EU マルチリージョンのデータセットに集約し、本社のダッシュボードからは承認済みビューで集計値だけを参照する"
+    d: "顧客データを地域ごとのデータセットに保存し、本社用のデータセットに毎日すべての行をコピーしてから集計する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。データの保存場所と処理場所を地域ごとに分けることで、所在地の要件を満たせます。BigQuery のクエリはデータのあるロケーションで実行されるため、各地域で集計し、個人を含まない集計値だけを本社に移します。"
+    b: "行レベルのアクセス ポリシーは誰がどの行を見られるかを制御する機能で、どこに保存するかの要件は満たせません。日本と EU の顧客データが米国に保存されます。"
+    c: "承認済みビューは参照できる範囲を制御する機能です。日本の顧客データが EU に保存されることになり、日本国内に保存するという要件に反します。"
+    d: "個人を含むすべての行が本社のデータセットにコピーされるため、所在地の要件に反します。"
+  explanation: |
+    データ所在地の要件は、**保存する場所** と **処理する場所** の両方で満たす必要があります。
+
+    | サービス | 場所の指定 |
+    | --- | --- |
+    | BigQuery | データセットのロケーション（リージョンまたはマルチリージョン）。作成後は変更できず、クエリはデータのあるロケーションで実行される |
+    | Cloud Storage | バケットのロケーション（リージョン、デュアルリージョン、マルチリージョン） |
+    | Dataflow | ジョブのリージョン（ワーカーが動く場所） |
+
+    - 地域ごとの要件があるときは、地域ごとにデータを分け、その地域で処理します。
+    - 地域をまたいで使うのは、集計や匿名化で要件の対象外になったデータだけにします。
+    - IAM の行レベルや列レベルの制御は「誰が見られるか」を決めるもので、「どこに置くか」の要件の代わりにはなりません。
+  references:
+    - title: "BigQuery のロケーション"
+      url: "https://docs.cloud.google.com/bigquery/docs/locations"
+    - title: "Dataflow のリージョン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/regional-endpoints"
+
+- id: design-reliability-015
+  domain: design
+  services: [cloud-storage, bigquery]
+  type: single
+  question: |
+    ある医療機器メーカーは、各工場から毎日送られてくる検査データのファイルを Cloud Storage で受け取り、すぐに BigQuery の本番テーブルに読み込んだ後、ファイルを削除しています。先日、ある工場のシステム更新で列の順番が変わったファイルが届き、誤った値が本番テーブルに入ってしまいました。元のファイルは削除済みだったため、正しく読み込み直すこともできませんでした。同じ問題を防ぎ、問題が起きても再処理できるように、取り込みの設計を見直したいと考えています。
+
+    最も適切な設計はどれですか？
+  choices:
+    a: "受け取ったファイルは変更せずに生データ用のバケットに一定期間保管し、まずステージング テーブルに読み込んで検証してから本番テーブルに反映する"
+    b: "これまでどおり本番テーブルに直接読み込み、問題が起きたときは BigQuery のタイムトラベルで読み込み前の状態に戻す"
+    c: "ファイルは読み込み後に削除し、本番テーブルのスナップショットを毎週作成して、問題が起きたときはスナップショットから復元する"
+    d: "各工場にファイルの形式を変更しないよう依頼し、取り込みの処理は現在のまま変更しない"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。生データを受け取ったままの形で保管しておけば、変換や読み込みに問題があっても再処理できます。ステージング テーブルでスキーマ、件数、値の範囲などを検証してから本番テーブルに反映すれば、誤ったデータが利用者に届くのを防げます。"
+    b: "タイムトラベルで誤ったデータを取り除けても、元のファイルがないため正しいデータを読み込み直せません。誤ったデータが本番テーブルに入り、利用者に見えてしまう問題も防げません。"
+    c: "週次のスナップショットから復元すると、その後に読み込んだ正しいデータも失われます。元のファイルがないため、再処理もできません。"
+    d: "送信元の変更を完全に防ぐことはできません。取り込み側で検証しない限り、同じ問題が再び起きます。"
+  explanation: |
+    信頼性と忠実性の高いパイプラインでは、データを **段階（ステージング）** に分けて扱います。
+
+    | 段階 | 置き場所の例 | 役割 |
+    | --- | --- | --- |
+    | 生データ（ランディング） | Cloud Storage | 受け取ったデータを変更せずに保管し、再処理に備える |
+    | ステージング | BigQuery のステージング テーブル | 読み込んだデータを検証する。本番の利用者からは見えない |
+    | 本番 | BigQuery の本番テーブル | 検証に合格したデータだけを MERGE などで反映する |
+
+    - 生データのバケットには、ライフサイクル ルールで保管期間を決め、古いデータは料金の安いストレージ クラスに移します。
+    - 検証では、スキーマ、件数、必須列、値の範囲、重複などを確認します。
+    - 各段階のデータを Dataplex のカタログに登録しておくと、利用者が検索して見つけられるようになります。
+  diagram: |
+    flowchart TD
+      F["工場からのファイル"] --> R["生データ<br/>Cloud Storage"]
+      R --> S["ステージング テーブル"]
+      S --> V{"検証"}
+      V -->|合格| P["本番テーブル"]
+      V -->|不合格| E["通知・調査"]
+      R -.->|再処理| S
+  references:
+    - title: "オブジェクトのライフサイクル管理"
+      url: "https://docs.cloud.google.com/storage/docs/lifecycle"
+    - title: "タイムトラベルを使用して履歴データにアクセスする"
+      url: "https://docs.cloud.google.com/bigquery/docs/time-travel"
+
+- id: design-reliability-016
+  domain: design
+  services: [bigquery, migration]
+  type: multiple
+  question: |
+    ある地方銀行は、オンプレミスのデータウェアハウスを BigQuery に移行する計画を立てています。現在のシステムには数百の ETL ジョブと数千のレポートがあり、複数の部門が日々の業務で使っています。経営陣は、移行中に業務が止まったり、移行後にレポートの数値が合わなくなったりするリスクをできるだけ小さくしたいと考えています。
+
+    移行計画として適切なものはどれですか？
+  choices:
+    a: "既存のジョブ、レポート、利用者、データの依存関係を棚卸しし、関係部門と合意しながら、影響の小さいユースケースから移行の順番を決める"
+    b: "ユースケースごとに段階的に移行し、一定期間は新旧のシステムを並行稼働させて結果を比較してから、旧システムの利用を止める"
+    c: "並行稼働の費用を抑えるため、すべてのデータ、ジョブ、レポートを週末の1回の作業で一斉に新しいシステムへ切り替える"
+    d: "利用部門への説明で移行が遅れないように、技術チームだけで移行を進め、切り替えが終わってから利用者に周知する"
+    e: "移行の作業を減らすため、既存のデータウェアハウスと同じ構成の仮想マシンを Compute Engine に作成し、そのまま使い続ける"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。移行の最初の段階では、ワークロード、利用者、プロセス、依存関係を評価し、関係者と合意して優先順位を決めます。影響が小さく効果が見えやすいユースケースから始めると、リスクを抑えながら経験を積めます。"
+    b: "正解です。段階的な移行と並行稼働により、問題が見つかっても旧システムで業務を続けられます。新旧の結果を比較して検証してから切り替えることで、数値の不一致のリスクを下げられます。"
+    c: "一斉の切り替え（ビッグバン移行）は、問題が起きたときの影響が大きく、切り戻しも難しくなります。リスクを小さくしたいという要件に反します。"
+    d: "利用部門が関わらないと、業務上の要件やレポートの使われ方を見落とし、切り替え後に業務が止まるおそれがあります。利用者の教育や業務プロセスの見直しも間に合いません。"
+    e: "仮想マシンへの移し替えでは運用の負担や拡張性の課題が残り、BigQuery に移行するという目的を果たせません。"
+  explanation: |
+    データウェアハウスの移行は、一度にすべてを移すのではなく、**評価 → 計画 → 段階的な移行 → 検証** の流れで進めます。
+
+    | 分析の観点 | 確認すること |
+    | --- | --- |
+    | 関係者 | 経営層、データの所有者、利用部門、運用チームの役割と期待 |
+    | ユーザー | 誰がどのレポートやデータを、どの頻度で使っているか |
+    | プロセス | ETL のスケジュール、承認の流れ、障害時の対応 |
+    | 技術 | スキーマ、SQL の方言、接続しているツール、ネットワーク |
+
+    - BigQuery Migration Service の **移行評価** を使うと、既存のデータウェアハウスのクエリやテーブルの使用状況を分析し、計画に役立てられます。
+    - 各ユースケースでは、スキーマとデータ、パイプライン、レポートの順に移し、新旧の結果を比較して検証します。
+    - 旧システムの停止は、すべての利用者が新しいシステムに移ったことを確認してから行います。
+  diagram: |
+    flowchart TD
+      A["評価と計画<br/>棚卸し・優先順位"] --> B["ユースケース単位で移行<br/>データ・ジョブ・レポート"]
+      B --> C["並行稼働と検証<br/>新旧の結果を比較"]
+      C --> D["切り替え"]
+      D -->|次のユースケース| B
+      D --> E["旧システムの停止"]
+  references:
+    - title: "Google Cloud への移行: スタートガイド"
+      url: "https://docs.cloud.google.com/architecture/migration-to-gcp-getting-started"
+
+- id: design-reliability-017
+  domain: design
+  services: [migration, bigquery, datastream]
+  type: single
+  question: |
+    ある通信会社は、オンプレミスの Teradata（約 80 TB）から BigQuery への移行を進めています。データセンターと Google Cloud は Cloud Interconnect で接続済みです。数百のテーブルについて、スキーマとデータを BigQuery に移したいと考えています。抽出や読み込みのスクリプトを自作して保守する手間は避けたいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "BigQuery Data Transfer Service の Teradata 移行を使い、オンプレミスのサーバーに移行エージェントをインストールして転送を構成する"
+    b: "Teradata のユーティリティで全テーブルを CSV にエクスポートするスクリプトを作成し、Cloud Storage にアップロードして bq load で読み込む"
+    c: "Datastream で Teradata をソースとするストリームを作成し、BigQuery に変更データをレプリケーションする"
+    d: "Database Migration Service で、Teradata から BigQuery への継続的な移行ジョブを作成する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。BigQuery Data Transfer Service の Teradata 移行では、オンプレミスで動く移行エージェントが Teradata からデータを抽出し、Cloud Storage を経由して BigQuery に読み込みます。スキーマの移行にも対応しており、スクリプトを自作する必要がありません。"
+    b: "数百のテーブルについて、抽出、アップロード、読み込み、スキーマの変換を自作のスクリプトで管理することになり、保守の手間を避けたいという要件に反します。"
+    c: "Datastream のソースは MySQL、PostgreSQL、Oracle、SQL Server などで、Teradata には対応していません。"
+    d: "Database Migration Service は Cloud SQL や AlloyDB へのデータベースの移行に使うサービスで、Teradata から BigQuery への移行には使えません。"
+  explanation: |
+    データウェアハウスの移行では、移行するものに応じてサービスを使い分けます。
+
+    | 移行するもの | サービス |
+    | --- | --- |
+    | Teradata や Amazon Redshift のスキーマとデータ | BigQuery Data Transfer Service（移行用の転送） |
+    | SQL のスクリプトやクエリ | BigQuery Migration Service の SQL 変換 |
+    | 既存環境の分析 | BigQuery Migration Service の移行評価 |
+    | 移行後のデータの検証 | Data Validation Tool |
+
+    Teradata 移行のしくみは次のとおりです。
+
+    - 移行エージェントがオンプレミスで動き、Teradata に接続してデータを抽出する
+    - 抽出したデータは Cloud Storage に一時的に保存され、BigQuery に読み込まれる
+    - オンプレミスから Google Cloud への通信には、Cloud Interconnect や Cloud VPN を使える
+  references:
+    - title: "Teradata から BigQuery への移行の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/migration/teradata-overview"
+    - title: "スキーマとデータ転送の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/migration/schema-data-overview"
+
+- id: design-reliability-018
+  domain: design
+  services: [migration, bigquery, datastream]
+  type: multiple
+  question: |
+    ある広告テクノロジー企業は、AWS の Amazon Redshift で運用しているデータウェアハウスを BigQuery に移行します。また、移行後も、取引先から Amazon S3 に毎日届くレポート ファイルを BigQuery に取り込み続ける必要があります。移行と日々の取り込みのどちらも、マネージド サービスを使って自作のコードと運用の手間を最小限にしたいと考えています。
+
+    どの方法を組み合わせるべきですか？
+  choices:
+    a: "BigQuery Data Transfer Service の Amazon Redshift 移行で、Redshift のスキーマとデータを BigQuery に転送する"
+    b: "BigQuery Data Transfer Service の Amazon S3 転送を毎日実行するようにスケジュールし、レポート ファイルを BigQuery に読み込む"
+    c: "Datastream で Amazon Redshift をソースとするストリームを作成し、BigQuery に変更データをレプリケーションする"
+    d: "Database Migration Service で、Amazon Redshift から BigQuery への移行ジョブを作成する"
+    e: "Amazon EC2 にスクリプトを配置し、S3 のファイルを毎日ダウンロードして bq コマンドで BigQuery に読み込む"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。Redshift 移行では、Redshift のデータを Amazon S3 にアンロードし、そこから BigQuery に転送します。スキーマとデータをマネージドに移行でき、自作のコードは不要です。"
+    b: "正解です。Amazon S3 転送は、S3 のファイルを定期的に BigQuery のテーブルに読み込むマネージドな機能です。スケジュールを設定すれば、日々の取り込みを自動化できます。"
+    c: "Datastream は Amazon Redshift をソースにできません。"
+    d: "Database Migration Service は Cloud SQL や AlloyDB へのデータベースの移行に使うサービスで、データウェアハウスから BigQuery への移行には使えません。"
+    e: "スクリプトとサーバーの保守が必要になり、運用の手間を最小限にするという要件に反します。"
+  explanation: |
+    BigQuery Data Transfer Service は、BigQuery へのデータの移行と定期的な読み込みを、コードを書かずにマネージドで行うサービスです。
+
+    | 転送元 | 主な用途 |
+    | --- | --- |
+    | Teradata | オンプレミスのデータウェアハウスの移行（移行エージェントを使用） |
+    | Amazon Redshift | データウェアハウスの移行（S3 を経由して転送） |
+    | Amazon S3、Azure Blob Storage、Cloud Storage | ファイルの定期的な読み込み |
+    | Google の SaaS（Google 広告など） | 広告やマーケティングのデータの定期的な読み込み |
+
+    ファイルを BigQuery ではなく Cloud Storage に置きたい場合（データレイクとして別のエンジンでも使う場合など）は、Storage Transfer Service で S3 から Cloud Storage にコピーします。
+  references:
+    - title: "BigQuery Data Transfer Service とは"
+      url: "https://docs.cloud.google.com/bigquery/docs/dts-introduction"
+    - title: "スキーマとデータ転送の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/migration/schema-data-overview"
+
+- id: design-reliability-019
+  domain: design
+  services: [migration, bigquery]
+  type: single
+  question: |
+    ある百貨店は、Teradata から BigQuery への移行を進めています。データの移行は完了しましたが、Teradata の SQL で書かれた ETL スクリプトとレポート用のクエリが約1万ファイル残っています。これらを GoogleSQL に効率よく書き換えたいと考えています。手作業での書き換えは最小限にしたいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "スクリプトを Cloud Storage にアップロードし、BigQuery Migration Service のバッチ SQL 変換で一括して GoogleSQL に変換する"
+    b: "BigQuery の画面の対話型 SQL 変換に、スクリプトを1ファイルずつ貼り付けて GoogleSQL に変換する"
+    c: "BigQuery Data Transfer Service の Teradata 移行を再実行し、スクリプトもテーブルと一緒に変換して移行する"
+    d: "Database Migration Service の変換ワークスペースにスクリプトを取り込み、BigQuery 用の SQL に変換する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。バッチ SQL 変換は、Cloud Storage に置いた大量の SQL ファイルを一括で GoogleSQL に変換し、結果を Cloud Storage に出力します。Teradata をはじめ、多くの SQL の方言に対応しています。"
+    b: "対話型 SQL 変換はアドホックなクエリの変換には便利ですが、1万ファイルを1つずつ処理するのは手作業が多すぎます。"
+    c: "BigQuery Data Transfer Service が移行するのはスキーマとデータで、SQL のスクリプトは変換しません。"
+    d: "Database Migration Service の変換ワークスペースは、Oracle などから PostgreSQL への移行でスキーマとコードを変換する機能で、BigQuery 用の SQL への変換には使いません。"
+  explanation: |
+    BigQuery Migration Service は、データウェアハウスの移行を支援する機能の集まりです。
+
+    | 機能 | 用途 |
+    | --- | --- |
+    | 移行評価 | 既存のデータウェアハウスを分析し、移行の計画に必要な情報をレポートする |
+    | バッチ SQL 変換 | Cloud Storage に置いた大量の SQL ファイルを一括で変換する |
+    | 対話型 SQL 変換 | BigQuery の画面で、クエリをその場で変換する |
+    | SQL 変換 API | 変換を自社のツールや CI/CD に組み込む |
+
+    バッチ SQL 変換では、移行元のテーブル定義などのメタデータも一緒に渡すと、変換の精度が上がります。変換できなかった箇所はレポートに出力されるため、手作業はその部分の確認と修正に絞れます。
+  references:
+    - title: "バッチ SQL 変換ツールを使用して SQL クエリを変換する"
+      url: "https://docs.cloud.google.com/bigquery/docs/batch-sql-translator"
+    - title: "対話型 SQL 変換ツールを使用して SQL クエリを変換する"
+      url: "https://docs.cloud.google.com/bigquery/docs/interactive-sql-translator"
+
+- id: design-reliability-020
+  domain: design
+  services: [migration, cloud-sql, datastream]
+  type: single
+  question: |
+    ある EC 事業者は、オンプレミスの MySQL（約 2 TB）で注文データベースを運用しており、Cloud SQL for MySQL に移行します。サービスの停止時間は、切り替え時の数分程度にとどめたいと考えています。移行の作業中も、オンプレミスのデータベースへの書き込みは続きます。移行の仕組みを自作せず、マネージド サービスで実現したいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "Database Migration Service で継続的な移行ジョブを作成し、初期コピーの後も変更をレプリケーションさせ、切り替え時に移行先を昇格する"
+    b: "サービスを停止して mysqldump でデータベース全体をエクスポートし、Cloud SQL にインポートしてからサービスを再開する"
+    c: "Datastream でオンプレミスの MySQL をソースとするストリームを作成し、Cloud SQL を宛先として変更をレプリケーションする"
+    d: "MySQL のデータを CSV にエクスポートして Storage Transfer Service で Cloud Storage に転送し、Cloud SQL に読み込む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Database Migration Service の継続的な移行では、初期の全体コピーの後も、ソースの変更を移行先に反映し続けます。切り替え時は書き込みを止めて移行先を昇格するだけなので、停止時間を短くできます。"
+    b: "2 TB のエクスポートとインポートが終わるまでサービスを止める必要があり、停止時間が長くなります。"
+    c: "Datastream の宛先は BigQuery や Cloud Storage などで、Cloud SQL を直接の宛先にはできません。データベースの移行には Database Migration Service を使います。"
+    d: "エクスポートの後の変更が反映されないため、切り替え時に再度の移行か長い停止が必要になります。手順も自作になります。"
+  explanation: |
+    データベースの移行と CDC のサービスは、移行先と目的で使い分けます。
+
+    | サービス | 主な用途 | 移行先・宛先 |
+    | --- | --- | --- |
+    | Database Migration Service | データベースの移行（同種・異種） | Cloud SQL、AlloyDB |
+    | Datastream | CDC による変更データのレプリケーション | BigQuery、Cloud Storage など |
+    | BigQuery Data Transfer Service | データウェアハウスやファイルからの転送 | BigQuery |
+
+    Database Migration Service で停止時間を短くする流れは次のとおりです。
+
+    1. 継続的な移行ジョブを作成し、初期の全体コピーを行う
+    2. ソースの変更を移行先に反映し続け、その間にアプリケーションの動作を確認する
+    3. 切り替え時にソースへの書き込みを止め、反映が追いついたら移行先を昇格する
+    4. アプリケーションの接続先を移行先に切り替える
+
+    ソースのデータベースとの接続には、IP 許可リスト、リバース SSH トンネル、VPC ピアリングなどを使えます。
+  references:
+    - title: "Database Migration Service の概要"
+      url: "https://docs.cloud.google.com/database-migration/docs/overview"
+
+- id: design-reliability-021
+  domain: design
+  services: [datastream, bigquery, migration, dataflow]
+  type: single
+  question: |
+    ある小売企業は、オンプレミスの Oracle で動いている販売管理システムのデータを分析に使うため、レポートを BigQuery へ6か月かけて段階的に移行しています。移行期間中も販売管理システムは稼働し続け、Oracle への更新は止められません。既存のレポートを1つずつ BigQuery に移す間、BigQuery のデータを Oracle とほぼリアルタイムに同期させておきたいと考えています。オンプレミスと Google Cloud は Cloud VPN で接続されています。自作のコードと Oracle への負荷は最小限にしたいとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "Datastream で Oracle をソースとするストリームを作成し、既存データのバックフィルの後、変更データを BigQuery に継続的にレプリケーションする"
+    b: "毎晩 Oracle の全テーブルをエクスポートして Cloud Storage にアップロードし、BigQuery のテーブルを読み込み直す"
+    c: "Database Migration Service で、Oracle から BigQuery への継続的な移行ジョブを作成する"
+    d: "JDBC で読み取る Dataflow のバッチ パイプラインを作成し、10分ごとに全テーブルを読み取って BigQuery に書き込む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Datastream は、データベースのログから変更データを読み取る（CDC）サーバーレスのサービスで、ソースへの負荷を抑えながら BigQuery にほぼリアルタイムで反映できます。既存データのバックフィルにも対応しており、自作のコードは不要です。"
+    b: "1日1回の同期では、ほぼリアルタイムという要件を満たせません。毎晩の全件エクスポートは Oracle への負荷も大きくなります。"
+    c: "Database Migration Service の移行先は Cloud SQL や AlloyDB で、BigQuery への移行には使えません。"
+    d: "全テーブルを繰り返し読み取るため Oracle への負荷が大きく、パイプラインのコードも自作になります。削除された行も検知できません。"
+  explanation: |
+    段階的な移行では、移行元のシステムを動かしたまま、移行先にデータを同期し続ける必要があります。この同期に **Datastream** を使います。
+
+    - **ソース**：Oracle、MySQL、PostgreSQL、SQL Server など
+    - **宛先**：BigQuery、Cloud Storage
+    - **バックフィル**：ストリームの開始時に、既存のデータをまとめてコピーする
+    - **CDC**：データベースのログから変更を読み取るため、テーブルを繰り返し読み取る方式よりソースへの負荷が小さい
+    - **接続**：IP 許可リスト、SSH トンネル、プライベート接続（VPC ピアリング）などを選べる
+
+    すべてのレポートを移し終えて移行元を停止するときに、ストリームも停止します。移行後も分析のために継続して取り込む場合は、そのまま運用を続けます。
+  diagram: |
+    flowchart TD
+      O["Oracle<br/>販売管理システム"] -->|Cloud VPN| DS["Datastream<br/>バックフィルと CDC"]
+      DS --> BQ["BigQuery"]
+      BQ --> R1["移行済みのレポート"]
+      O --> R2["未移行のレポート"]
+  references:
+    - title: "Datastream の概要"
+      url: "https://docs.cloud.google.com/datastream/docs/overview"
+
+- id: design-reliability-022
+  domain: design
+  services: [migration, cloud-storage, networking]
+  type: single
+  question: |
+    ある研究機関は、オンプレミスの NFS ファイルサーバーにある約 60 TB の実験データを Cloud Storage に移行します。データセンターと Google Cloud は 10 Gbps の Dedicated Interconnect で接続されており、移行には数日かけてよいと考えています。移行期間中も研究者はファイルを追加・更新するため、切り替えまでは変更されたファイルだけを定期的に転送したいとしています。また、業務の通信に影響しないように転送の帯域を制限し、転送したファイルの整合性も確認したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "オンプレミスのサーバーに Storage Transfer Service のエージェントをインストールし、帯域の上限を設定したファイル システムからの転送ジョブを定期実行する"
+    b: "Transfer Appliance を注文してデータをコピーし、Google に返送して Cloud Storage にアップロードしてもらう"
+    c: "gcloud storage rsync コマンドを実行するスクリプトを作成し、オンプレミスのサーバーの cron で定期実行する"
+    d: "BigQuery Data Transfer Service で NFS のディレクトリを転送元とする転送を作成し、定期実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Storage Transfer Service のエージェントを使うと、オンプレミスのファイル システムから Cloud Storage へのマネージドな転送ジョブを実行できます。帯域の上限、変更されたファイルだけの転送、チェックサムによる整合性の確認、スケジュール実行、進行状況の監視に対応しています。"
+    b: "10 Gbps の回線があれば 60 TB は数日以内に転送できるため、Transfer Appliance は必要ありません。配送の期間もかかり、切り替えまでの定期的な差分の転送にも対応できません。"
+    c: "変更されたファイルの同期はできますが、スクリプトの保守、失敗時の再試行、帯域の制御、進行状況の監視を自前で用意する必要があります。大量のデータの移行には Storage Transfer Service が適しています。"
+    d: "BigQuery Data Transfer Service は BigQuery にデータを読み込むサービスで、NFS のファイルを Cloud Storage に移行する用途には使えません。"
+  explanation: |
+    ファイルの転送方法は、データ量、使える帯域、転送元で選びます。
+
+    | 方法 | 向いている場面 |
+    | --- | --- |
+    | gcloud storage コマンド | 少量のデータを手軽に転送する |
+    | Storage Transfer Service（エージェントあり） | オンプレミスのファイル システムから大量のデータを転送する |
+    | Storage Transfer Service（エージェントなし） | Amazon S3、Azure Blob Storage、URL のリスト、別の Cloud Storage バケットから転送する |
+    | Transfer Appliance | ネットワークでは時間がかかりすぎる大量のデータを、物理的な機器で運ぶ |
+
+    転送時間の見積もり：60 TB は約 480,000 Gb（1 TB ≒ 8,000 Gb）なので、10 Gbps の回線を使い切れば約 48,000 秒（約13時間）です。帯域を半分に制限しても1日程度で終わるため、ネットワークでの転送で十分です。
+  references:
+    - title: "Storage Transfer Service の概要"
+      url: "https://docs.cloud.google.com/storage-transfer/docs/overview"
+
+- id: design-reliability-023
+  domain: design
+  services: [migration, networking, cloud-storage]
+  type: single
+  question: |
+    ある病院グループは、データセンターに保存している医用画像のアーカイブ約 600 TB を Cloud Storage に移行したいと考えています。移行に使えるインターネット回線の帯域は 500 Mbps で、通常業務の通信にも使われています。移行は2か月以内に完了させる必要があります。新たに専用線を契約する費用と期間はかけたくないとしています。
+
+    どうすればよいですか？
+  choices:
+    a: "Transfer Appliance を注文してデータをコピーし、Google に返送して Cloud Storage にアップロードしてもらう"
+    b: "Storage Transfer Service のエージェントを複数のサーバーにインストールし、500 Mbps の回線で並列に転送する"
+    c: "gcloud storage cp コマンドで並列転送を行い、500 Mbps の回線で Cloud Storage に直接アップロードする"
+    d: "Dedicated Interconnect で 10 Gbps の回線を新たに用意し、Storage Transfer Service で転送する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。600 TB を 500 Mbps で転送すると、回線を使い切っても約111日かかり、2か月以内に終わりません。Transfer Appliance なら、ネットワークの帯域に左右されずに大量のデータを物理的に運べます。"
+    b: "エージェントを増やしても回線の帯域（500 Mbps）が上限になるため、転送時間は短くなりません。業務の通信にも影響します。"
+    c: "並列にしても回線の帯域が上限であることは変わらず、約111日以上かかります。"
+    d: "帯域は足りますが、専用線の契約と工事に費用と期間がかかり、要件に反します。"
+  explanation: |
+    ネットワークで転送するか物理的な機器で運ぶかは、**転送にかかる日数** を見積もって判断します。
+
+    転送時間（秒）＝ データ量（ビット）÷ 帯域（ビット/秒）
+
+    - 1 TB ≒ 8,000 Gb（8 × 10^12 ビット）
+    - 600 TB × 8,000 Gb ÷ 0.5 Gbps ＝ 9,600,000 秒 ≒ 111日
+
+    回線を使い切った場合の理論値の目安は次のとおりです。実際には業務の通信と共有し、プロトコルのオーバーヘッドもあるため、さらに長くかかります。
+
+    | データ量 | 100 Mbps | 1 Gbps | 10 Gbps |
+    | --- | --- | --- | --- |
+    | 1 TB | 約1日 | 約2時間 | 約13分 |
+    | 10 TB | 約9日 | 約1日 | 約2時間 |
+    | 100 TB | 約93日 | 約9日 | 約1日 |
+    | 1 PB | 約2.5年 | 約93日 | 約9日 |
+
+    Transfer Appliance では、Google から届いた機器にデータをコピーして返送すると、Google がデータを Cloud Storage のバケットにアップロードします。データは機器の中で暗号化された状態で運ばれます。
+  diagram: |
+    flowchart TD
+      A["データ量と<br/>使える帯域"] --> B{"期限内に<br/>ネットワークで転送できる？"}
+      B -->|はい| C{"転送元"}
+      C -->|オンプレミス| D["Storage Transfer Service<br/>エージェントあり"]
+      C -->|他のクラウド| E["Storage Transfer Service"]
+      B -->|いいえ| F["Transfer Appliance"]
+  references:
+    - title: "Transfer Appliance の概要"
+      url: "https://docs.cloud.google.com/transfer-appliance/docs/4.0/overview"
+    - title: "Google Cloud への移行: 大規模なデータセットの転送"
+      url: "https://docs.cloud.google.com/architecture/migration-to-google-cloud-transferring-your-large-datasets"
+
+- id: design-reliability-024
+  domain: design
+  services: [networking, migration]
+  type: single
+  question: |
+    ある製薬会社は、自社のデータセンターから Google Cloud への移行を計画しています。移行期間中は、オンプレミスのデータベースからのレプリケーションや大量のファイル転送のため、常時 5 Gbps 程度の帯域が必要です。セキュリティ部門の方針で、通信に公共のインターネットを経由させてはいけません。データセンターは Google と接続できるコロケーション施設から離れており、自社で回線を施設まで引き込むことは難しい状況です。
+
+    どの接続方法を選ぶべきですか？
+  choices:
+    a: "サービス プロバイダを経由してオンプレミスと VPC を接続する Partner Interconnect を使用する"
+    b: "コロケーション施設で Google のネットワークと物理的に接続する Dedicated Interconnect を使用する"
+    c: "インターネット経由で暗号化したトンネルを張る HA VPN を使用する"
+    d: "Google のエッジ ネットワークと直接ピアリングする Direct Peering を使用する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Partner Interconnect は、サポートされているサービス プロバイダの回線を経由して、オンプレミスと VPC をインターネットを通らずに接続します。コロケーション施設で Google と直接接続できない場合に適しており、必要な帯域に応じて容量を選べます。"
+    b: "Dedicated Interconnect は、コロケーション施設で Google のネットワークと物理的に接続する必要があります。施設まで回線を引き込めないという条件に合いません。"
+    c: "HA VPN の通信は暗号化されますが、公共のインターネットを経由するため、セキュリティ部門の方針に反します。"
+    d: "Direct Peering は Google Workspace や Google の公開 API などに接続するためのもので、VPC 内のリソースへのプライベートな接続には使えません。"
+  explanation: |
+    オンプレミスと Google Cloud の接続方法は、**経路**、**帯域**、**物理的に接続できるか** で選びます。
+
+    | 接続方法 | 経路 | 向いている場面 |
+    | --- | --- | --- |
+    | HA VPN | インターネット（IPsec で暗号化） | 早く安く始めたい。必要な帯域が比較的小さい |
+    | Partner Interconnect | サービス プロバイダの回線 | コロケーション施設で直接接続できない。帯域を柔軟に選びたい |
+    | Dedicated Interconnect | コロケーション施設での直接の物理接続 | 大容量の通信を継続的に行う。施設で接続できる |
+
+    - Cloud Interconnect の通信はインターネットを経由しませんが、既定では暗号化されません。暗号化が必要な場合は、Interconnect 上の HA VPN や MACsec を使います。
+    - 冗長な構成にすると、Interconnect でも 99.9% や 99.99% の可用性 SLA を得られます。
+  references:
+    - title: "Cloud Interconnect の概要"
+      url: "https://docs.cloud.google.com/network-connectivity/docs/interconnect/concepts/overview"
+    - title: "Cloud VPN の概要"
+      url: "https://docs.cloud.google.com/network-connectivity/docs/vpn/concepts/overview"
+
+- id: design-reliability-025
+  domain: design
+  services: [migration, bigquery, dataplex, datastream]
+  type: multiple
+  question: |
+    ある資産運用会社は、オンプレミスの Oracle にある取引履歴のデータ（数十億行）を BigQuery に移行し、現在は新旧のシステムを並行稼働させています。監査部門から、移行したデータが移行元と一致していることを示すよう求められています。すべてのテーブルについて行数と金額の列の合計・最小値・最大値が一致すること、さらに重要なテーブルについては行単位で内容が一致することを確認する必要があります。並行稼働の期間中は、この検証を繰り返し自動で実行したいと考えています。
+
+    どの方法を組み合わせるべきですか？
+  choices:
+    a: "Data Validation Tool の列の検証で、すべてのテーブルの行数と金額の列の集計値を移行元と移行先で比較する"
+    b: "Data Validation Tool の行の検証で、重要なテーブルの各行のハッシュ値を移行元と移行先で比較する"
+    c: "Dataplex の自動データ品質で BigQuery のテーブルにデータ品質スキャンを作成し、NULL や値の範囲のルールで検証する"
+    d: "移行元と移行先のそれぞれで COUNT(*) のクエリを手動で実行し、テーブルごとの行数を表計算ソフトで比較する"
+    e: "Datastream で Oracle から BigQuery へのストリームを作成し、レプリケーションでエラーが出ていないことを確認する"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。Data Validation Tool は、異なるデータベースの間でデータを比較するオープンソースのツールです。列の検証では、行数や列の合計・最小値・最大値などの集計値を比較でき、多くのテーブルの欠落や誤差を効率よく見つけられます。"
+    b: "正解です。行の検証では、行ごとにハッシュ値を計算して比較するため、集計値では見つからない個々の値の違いも検出できます。処理の負荷が大きいため、重要なテーブルに絞って使うのが効率的です。"
+    c: "自動データ品質は1つのテーブルのデータがルールを満たしているかを確認する機能で、移行元の Oracle と内容が一致しているかは比較できません。"
+    d: "行数だけでは値の誤りを見つけられず、手作業では繰り返し自動で実行するという要件にも反します。"
+    e: "レプリケーションのエラーがないことは、データが一致していることの証明になりません。Datastream はデータを複製するサービスで、検証のツールではありません。"
+  explanation: |
+    移行の検証は、**粗い確認から細かい確認へ** と段階的に行います。Google が公開しているオープンソースの **Data Validation Tool（DVT）** は、BigQuery、Oracle、Teradata、SQL Server、PostgreSQL など多くのデータベースに対応しています。
+
+    | 検証の種類 | 比較する内容 | 使いどころ |
+    | --- | --- | --- |
+    | スキーマの検証 | 列の名前とデータ型 | 定義の違いを見つける |
+    | 列の検証 | 行数、合計、最小値、最大値（グループごとも可） | すべてのテーブルで欠落や誤差をすばやく見つける |
+    | 行の検証 | 行ごとのハッシュ値 | 重要なテーブルで個々の値の違いを見つける |
+    | カスタム クエリの検証 | 任意のクエリの結果 | 業務のロジックを確認する |
+
+    検証の結果を BigQuery のテーブルに保存すると、並行稼働の期間中の推移を記録でき、監査の証跡としても使えます。
+  references:
+    - title: "スキーマとデータ転送の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/migration/schema-data-overview"

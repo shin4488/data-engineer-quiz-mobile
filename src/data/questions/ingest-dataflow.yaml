@@ -1,0 +1,1092 @@
+- id: ingest-dataflow-001
+  domain: ingest
+  services: [dataflow, pubsub, cloud-storage]
+  type: single
+  question: |
+    あるアパレル EC 企業は、Pub/Sub から受け取った注文イベントを Apache Beam（Java）のストリーミング パイプラインで検証・変換し、Dataflow で BigQuery に書き込んでいます。新たに、Cloud Storage に保存されている過去2年分の注文ファイル（JSON、合計で数 TB）にも同じ検証・変換を適用し、BigQuery に読み込むことになりました。変換ロジックを二重に管理したくなく、既存のコードの変更も最小限にしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "検証・変換を複合 PTransform にまとめ、入力元をパイプライン オプションで切り替えて、バッチジョブとして実行する"
+    b: "過去のファイルを1件ずつ Pub/Sub に再パブリッシュし、稼働中のストリーミング パイプラインに流して既存の処理で変換させる"
+    c: "同じ検証・変換を BigQuery の SQL で書き直し、過去のファイルはいったん BigQuery に読み込んでから SQL で変換する"
+    d: "過去のファイルの処理用に Dataproc の Spark ジョブを作成し、同じ検証・変換を Spark のコードで実装する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Apache Beam は同じ変換をバッチ（境界のあるデータ）にもストリーミング（境界のないデータ）にも適用できます。変換を複合 PTransform にまとめれば、入力を TextIO と PubsubIO で切り替えるだけで再利用できます。"
+    b: "数 TB を Pub/Sub 経由で流すのは時間とコストがかかります。イベント時刻で集計する処理があれば、古いタイムスタンプの要素が遅延データとして扱われ、集計から漏れるおそれもあります。"
+    c: "変換ロジックを SQL と Beam のコードで二重に管理することになり、要件に反します。"
+    d: "Spark で同じ処理を書き直すため、変換ロジックの二重管理になります。クラスタの運用も増えます。"
+  explanation: |
+    Apache Beam は **バッチとストリーミングを同じプログラミング モデルで書ける** のが特長です。データソースによって PCollection の性質が変わるだけで、変換（PTransform）は共通にできます。
+
+    | データ | PCollection | 主な I/O の例 | Dataflow の実行モード |
+    | --- | --- | --- | --- |
+    | 過去のファイル | 境界あり（bounded） | TextIO、AvroIO、BigQueryIO | バッチ |
+    | Pub/Sub のイベント | 境界なし（unbounded） | PubsubIO、KafkaIO | ストリーミング |
+
+    設計のポイント:
+
+    - 業務ロジックは **複合 PTransform** にまとめ、ソースとシンクから切り離す
+    - 入力元・出力先・処理対象の期間などは **カスタムのパイプライン オプション** として定義し、起動時に指定する
+    - 量が決まっている過去データの再処理（バックフィル）は、常時稼働のストリーミングではなく **バッチジョブ** で処理するほうが、速く安く済む
+
+    データの到着の仕方と、結果が必要になるまでの時間に応じて、バッチかストリーミングかを選びます。
+  references:
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+    - title: "Dataflow パイプライン オプションを設定する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/setting-pipeline-options"
+
+- id: ingest-dataflow-002
+  domain: ingest
+  services: [dataflow, networking, vpc-sc]
+  type: multiple
+  question: |
+    ある金融機関では、組織のポリシーで VM への外部 IP アドレスの付与が禁止されています。データエンジニアは、Cloud Storage のファイルを読み込んで BigQuery に書き込む Dataflow のバッチジョブを、社内用のカスタム VPC のサブネットで実行しようとしています。ワーカーにはインターネットへの経路を持たせずに、Google Cloud の API にはアクセスできるようにする必要があります。
+
+    どの対応を組み合わせるべきですか？
+  choices:
+    a: "パイプライン オプションで、ワーカーに外部 IP アドレスを割り当てない設定を指定する"
+    b: "ワーカーが使うサブネットで、限定公開の Google アクセスを有効にする"
+    c: "サブネットのリージョンに Cloud NAT を構成し、ワーカーの通信を NAT 経由にする"
+    d: "VPC Service Controls の境界を作成し、Dataflow と BigQuery のプロジェクトを含める"
+    e: "ワーカーのネットワーク タグに対して、0.0.0.0/0 への下り通信を許可するルールを作る"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。Java は `--usePublicIps=false`、Python は `--no_use_public_ips` を指定すると、ワーカーは内部 IP アドレスだけで起動します。組織のポリシーにも違反しません。"
+    b: "正解です。限定公開の Google アクセスを有効にしたサブネットでは、内部 IP アドレスだけの VM から Cloud Storage や BigQuery などの Google API にアクセスできます。"
+    c: "Cloud NAT はインターネット上の宛先に出ていくための仕組みです。ワーカーにインターネットへの経路を持たせないという要件に反します。"
+    d: "VPC Service Controls はデータの持ち出しを防ぐための境界で、内部 IP アドレスだけの VM に Google API への経路を与える機能ではありません。"
+    e: "ファイアウォール ルールは通信を許可・拒否するだけで、経路は作りません。外部 IP アドレスがない VM は、このルールだけでは外部に出られません。"
+  explanation: |
+    **内部 IP アドレスだけで Dataflow を動かす構成** は、試験で頻出です。
+
+    1. パイプライン オプションで外部 IP アドレスを無効にする
+       - Java: `--usePublicIps=false`
+       - Python: `--no_use_public_ips`
+    2. `--subnetwork`（または `--network`）で、ワーカーを起動するサブネットを指定する
+    3. そのサブネットで **限定公開の Google アクセス** を有効にする
+
+    | 宛先 | 必要なもの |
+    | --- | --- |
+    | Google API（Cloud Storage、BigQuery、Pub/Sub など） | 限定公開の Google アクセス |
+    | インターネット上の API やパッケージ リポジトリ | Cloud NAT（または外部 IP アドレス） |
+    | オンプレミスや他の VPC | Cloud VPN、Cloud Interconnect、VPC ネットワーク ピアリング |
+
+    Python のパイプラインで依存パッケージを PyPI から実行時に取得する構成は、インターネットに出られないと失敗します。依存関係はカスタム コンテナや Flex テンプレートのイメージに含めておきます。
+  references:
+    - title: "インターネット アクセスとファイアウォール ルールを構成する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/routes-firewall"
+    - title: "限定公開の Google アクセス"
+      url: "https://docs.cloud.google.com/vpc/docs/private-google-access"
+
+- id: ingest-dataflow-003
+  domain: ingest
+  services: [dataflow, networking, iam]
+  type: multiple
+  question: |
+    ある製薬会社は共有 VPC を採用しており、ネットワークはホスト プロジェクトでネットワーク チームが一元管理しています。データ基盤チームはサービス プロジェクトで Dataflow ジョブを実行し、ホスト プロジェクトから共有されたサブネットを経由して、オンプレミスの研究システムと通信する必要があります。ジョブを起動したところ、指定したサブネットワークを使用できないというエラーで失敗しました。権限は必要最小限にとどめる方針です。
+
+    どの対応を組み合わせるべきですか？
+  choices:
+    a: "パイプライン オプション `--subnetwork` に、ホスト プロジェクト ID を含むサブネットワークの完全な URL を指定する"
+    b: "サービス プロジェクトの Dataflow サービス アカウントに、共有サブネットに対する Compute ネットワーク ユーザー ロールを付与する"
+    c: "サービス プロジェクトに新しい VPC とサブネットを作成し、VPC ネットワーク ピアリングでホスト プロジェクトの VPC と接続する"
+    d: "ジョブを起動するユーザーに、ホスト プロジェクトのオーナー ロールを付与して、ネットワークを操作できるようにする"
+    e: "パイプライン オプション `--network` にホスト プロジェクトの VPC 名だけを指定し、サブネットワークの指定を省略する"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。共有 VPC のサブネットを使う場合は、`https://www.googleapis.com/compute/v1/projects/HOST_PROJECT_ID/regions/REGION/subnetworks/SUBNETWORK` の形式の完全な URL で指定します。"
+    b: "正解です。共有サブネットは、サービス プロジェクトの Dataflow サービス アカウントと共有し、そのサブネットに対する Compute ネットワーク ユーザー（`roles/compute.networkUser`）ロールを付与する必要があります。"
+    c: "ネットワークをチームごとに作ることになり、ホスト プロジェクトで一元管理するという共有 VPC の方針に反します。ピアリングの設計と運用も増えます。"
+    d: "オーナー ロールは権限が大きすぎ、最小権限の方針に反します。ワーカーがサブネットを使うには、Dataflow サービス アカウントへのロール付与も必要です。"
+    e: "ネットワーク名だけでは、オンプレミスと通信するために使うサブネットを指定できません。共有 VPC のサブネットは `--subnetwork` に完全な URL で指定し、Dataflow サービス アカウントの権限も必要です。"
+  explanation: |
+    **共有 VPC で Dataflow を動かす** ときの要点です。
+
+    - ワーカーはサービス プロジェクトで起動し、ネットワークはホスト プロジェクトのものを使う
+    - `--subnetwork` には、ホスト プロジェクト ID を含む **完全な URL** を指定する
+    - サービス プロジェクトの **Dataflow サービス アカウント**（`service-<プロジェクト番号>@dataflow-service-producer-prod.iam.gserviceaccount.com`）に、共有サブネットに対する **Compute ネットワーク ユーザー** ロールを付与する
+    - ファイアウォール ルールはホスト プロジェクトの VPC で管理する
+
+    ロールはプロジェクト全体ではなく、**使うサブネット単位** で付与すると、最小権限を保てます。
+  diagram: |
+    flowchart TD
+      subgraph H["ホスト プロジェクト"]
+        V["共有 VPC"] --> S["共有サブネット"]
+        V --> I["Cloud Interconnect"]
+      end
+      subgraph P["サービス プロジェクト"]
+        D["Dataflow ジョブ"]
+        A["Dataflow サービス アカウント"]
+      end
+      A -->|Compute ネットワーク ユーザー| S
+      D -->|完全な URL で指定| S
+      I --> O["オンプレミス"]
+  references:
+    - title: "ネットワークとサブネットワークを指定する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/specifying-networks"
+    - title: "共有 VPC"
+      url: "https://docs.cloud.google.com/vpc/docs/shared-vpc"
+
+- id: ingest-dataflow-004
+  domain: ingest
+  services: [dataflow, networking]
+  type: single
+  question: |
+    あるエネルギー企業は、Streaming Engine を使わない構成のストリーミング ジョブを Dataflow で実行しています。セキュリティ強化のため、ネットワーク チームがカスタム VPC の上り（ingress）通信を原則拒否にし、必要な通信だけを個別に許可する方針に切り替えました。その直後から、ワーカーのログにワーカー間の通信のタイムアウトを示すエラーが出て、処理が進まなくなりました。パイプラインの構成は変更せずに解決したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "ワーカーのネットワーク タグを送信元と送信先にして、TCP 12345〜12346 の上り通信を許可するルールを追加する"
+    b: "ワーカー VM のネットワーク タグに対して、すべての宛先への下り（egress）通信を許可するファイアウォール ルールを追加する"
+    c: "ワーカーのサブネットで限定公開の Google アクセスを有効にし、Dataflow の API への経路を確保する"
+    d: "ワーカーのサブネットのリージョンに Cloud NAT を構成し、ワーカー間の通信を NAT ゲートウェイ経由にする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Streaming Engine や Dataflow Shuffle を使わないジョブでは、ワーカー同士が TCP 12345（ストリーミング）と 12346（バッチ）で通信します。Dataflow はすべてのワーカー VM に `dataflow` というネットワーク タグを付けるため、このタグをルールの対象にできます。"
+    b: "原因はワーカー間の上り通信が拒否されていることです。下り通信を許可しても、受信側で上り通信が拒否されたままでは通信できません。"
+    c: "限定公開の Google アクセスは、内部 IP アドレスの VM から Google API に到達するための設定で、ワーカー同士の通信には関係しません。"
+    d: "Cloud NAT はインターネットへの送信用の仕組みで、同じ VPC 内のワーカー同士の通信には使いません。"
+  explanation: |
+    Dataflow のワーカー同士の通信に必要なファイアウォール ルールです。
+
+    | ジョブの構成 | ワーカー間の通信 | 必要なルール |
+    | --- | --- | --- |
+    | Streaming Engine を使うストリーミング | 不要（バックエンドで処理） | Google API へのアクセスだけ |
+    | Dataflow Shuffle を使うバッチ | 不要（バックエンドで処理） | Google API へのアクセスだけ |
+    | Streaming Engine を使わないストリーミング | TCP 12345 | 上り通信の許可ルール |
+    | Dataflow Shuffle を使わないバッチ | TCP 12346 | 上り通信の許可ルール |
+
+    - VPC には暗黙の「上り通信をすべて拒否」があるため、**上り通信の許可ルールは必ず作る** 必要がある
+    - ルールの対象は **ネットワーク タグ** で絞る。Dataflow はすべてのワーカー VM に `dataflow` タグを付ける
+    - 階層型ファイアウォール ポリシーがある場合は、VPC のルールより先に評価される
+
+    パイプラインの構成を変えてよい場合は、Streaming Engine を使うと、このワーカー間通信自体が不要になります。
+  references:
+    - title: "インターネット アクセスとファイアウォール ルールを構成する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/routes-firewall"
+    - title: "Dataflow のネットワークに関する問題のトラブルシューティング"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/troubleshoot-networking"
+
+- id: ingest-dataflow-005
+  domain: ingest
+  services: [dataflow, networking]
+  type: single
+  question: |
+    ある広告企業は、Dataflow のストリーミング パイプラインで、広告の配信イベントに外部の SaaS が提供する REST API の情報を付け加えています。セキュリティ方針により、ワーカーには外部 IP アドレスを付与できず、ワーカーは内部 IP アドレスだけで動いています。SaaS 側は、接続元の IP アドレスを事前に登録する許可リストで API へのアクセスを制限しています。
+
+    ワーカーから外部の API にアクセスできるようにするには、どうすればよいですか？
+  choices:
+    a: "ワーカーのサブネットのリージョンに Cloud NAT を構成し、手動で割り当てた静的外部 IP アドレスを SaaS の許可リストに登録する"
+    b: "ワーカーのサブネットで限定公開の Google アクセスを有効にし、SaaS の API にも Google のネットワークの内部経路でアクセスさせる"
+    c: "ワーカーごとに静的外部 IP アドレスを予約して割り当て、すべての IP アドレスを SaaS の許可リストに登録する"
+    d: "ワーカーのネットワーク タグに対して、SaaS の IP アドレスへの下り（egress）通信を許可するファイアウォール ルールを作成する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Cloud NAT を使うと、内部 IP アドレスだけのワーカーがインターネット上の API にアクセスできます。NAT IP アドレスを手動で割り当てれば、接続元の IP アドレスが固定され、許可リストに登録できます。"
+    b: "限定公開の Google アクセスで到達できるのは Google の API とサービスだけです。外部の SaaS には到達できません。"
+    c: "ワーカーに外部 IP アドレスを付与できないという方針に反します。オートスケーリングでワーカー数が変わるため、IP アドレスの管理も困難です。"
+    d: "ファイアウォール ルールは通信を許可するだけで、インターネットへの経路は作りません。外部 IP アドレスがないワーカーは、このルールだけでは外部に出られません。"
+  explanation: |
+    内部 IP アドレスだけの Dataflow ワーカーから **Google Cloud の外にある API やサービス** にアクセスするには、**Cloud NAT** を使います。
+
+    - Cloud NAT は Cloud Router とともにリージョン単位で構成し、指定したサブネットの VM の送信通信を変換する
+    - NAT IP アドレスの割り当ては、自動と手動を選べる。接続先の許可リストに登録するなら、**予約した静的外部 IP アドレスを手動で割り当てる**
+    - 同じ宛先への同時接続が多い場合は、NAT IP アドレスを複数割り当て、すべてを許可リストに登録する
+
+    Google API へのアクセスには限定公開の Google アクセス、インターネットへのアクセスには Cloud NAT と、宛先によって使い分けます。
+  diagram: |
+    flowchart TD
+      W["Dataflow ワーカー<br/>内部 IP のみ"] --> R{"宛先"}
+      R -->|Google API| G["限定公開の<br/>Google アクセス"]
+      R -->|インターネット| N["Cloud NAT<br/>静的外部 IP"]
+      G --> B["BigQuery など"]
+      N --> S["SaaS の API<br/>許可リストで制限"]
+  references:
+    - title: "インターネット アクセスとファイアウォール ルールを構成する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/routes-firewall"
+    - title: "IP アドレスとポート（Cloud NAT）"
+      url: "https://docs.cloud.google.com/nat/docs/ports-and-addresses"
+
+- id: ingest-dataflow-006
+  domain: ingest
+  services: [dataflow, kms]
+  type: single
+  question: |
+    ある医療機関は、患者の検査データを加工する Dataflow のバッチ パイプラインを asia-northeast1 リージョンで実行しています。社内規程により、パイプラインが処理の途中で保存するデータ（ワーカーの永続ディスクやシャッフルのデータなど）も、自組織で管理する Cloud KMS の鍵で暗号化しなければなりません。パイプラインのコードは変更したくありません。
+
+    要件を満たすには、どうすればよいですか？
+  choices:
+    a: "asia-northeast1 に Cloud KMS の鍵を作成し、ジョブの起動時にパイプライン オプション `--dataflowKmsKey` で指定する"
+    b: "どのリージョンのジョブでも使えるように global ロケーションに Cloud KMS の鍵を作成し、起動時に `--dataflowKmsKey` で指定する"
+    c: "顧客指定の暗号鍵（CSEK）を生成して安全な場所に保管し、ジョブの起動時にパイプライン オプションでワーカーの永続ディスクの鍵として指定する"
+    d: "各 DoFn の中で Cloud KMS の API を呼び出し、レコードを暗号化してから次の変換に渡すようにパイプラインを書き換える"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。`--dataflowKmsKey`（Python は `--dataflow_kms_key`）で顧客管理の暗号鍵（CMEK）を指定すると、ワーカーの永続ディスクやシャッフルの状態などのパイプラインの状態が、その鍵で保護されます。鍵はジョブと同じリージョンに作成します。"
+    b: "CMEK の鍵のロケーションは、ジョブのリージョンと同じにする必要があります。Dataflow では global やマルチリージョンの鍵ではなく、ジョブと同じリージョンの鍵を使います。"
+    c: "Dataflow で鍵を指定してパイプラインの状態を暗号化する仕組みは、Cloud KMS の鍵を使う CMEK です。CSEK は鍵そのものを利用者が保管して渡す方式で、Cloud KMS の鍵で暗号化するという社内規程にも合いません。"
+    d: "コードの変更が必要で、要件に反します。レコード単位で暗号化と復号を行うため、処理の負荷も大きくなります。"
+  explanation: |
+    Dataflow で **顧客管理の暗号鍵（CMEK）** を使う手順です。
+
+    1. ジョブと **同じリージョン** に Cloud KMS の鍵を作成する（global やマルチリージョンの鍵は使わない）
+    2. **Dataflow サービス アカウント**（`service-<プロジェクト番号>@dataflow-service-producer-prod.iam.gserviceaccount.com`）と **Compute Engine サービス アカウント**（`service-<プロジェクト番号>@compute-system.iam.gserviceaccount.com`）に、その鍵に対する `roles/cloudkms.cryptoKeyEncrypterDecrypter` ロールを付与する
+    3. ジョブの起動時に `--dataflowKmsKey`（Python は `--dataflow_kms_key`）で鍵を指定する
+
+    **CMEK で保護されるもの・されないもの**
+
+    | 対象 | CMEK の適用 |
+    | --- | --- |
+    | ワーカーの永続ディスク、Dataflow Shuffle や Streaming Engine に保存される状態 | 指定した鍵で暗号化される |
+    | ジョブのメタデータ（ジョブ名、パラメータの値、パイプライン グラフなど） | 対象外（Google が管理する暗号化） |
+    | ソースとシンク（Cloud Storage、BigQuery など） | それぞれのリソース側で CMEK を設定する |
+
+    ジョブのメタデータは CMEK の対象外なので、ジョブ名やパラメータに機密情報を含めないようにします。
+  references:
+    - title: "顧客管理の暗号鍵を使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/customer-managed-encryption-keys"
+    - title: "パイプライン オプション"
+      url: "https://docs.cloud.google.com/dataflow/docs/reference/pipeline-options"
+
+- id: ingest-dataflow-007
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    ある通信事業者は、数十億件の通話記録を Dataflow のバッチ パイプラインで処理し、契約者 ID ごとの通話時間の合計を計算しています。現在のコードは、GroupByKey で契約者 ID ごとにすべての通話記録を集めてから、ParDo で通話時間を合計しています。シャッフルされるデータ量が多く、ジョブに時間がかかっています。
+
+    処理を効率化するには、どうすればよいですか？
+  choices:
+    a: "GroupByKey と ParDo を、合計を計算する Combine.perKey に置き換える"
+    b: "GroupByKey の前に Reshuffle を挿入して、通話記録をワーカー間に均等に分散させる"
+    c: "ワーカーをハイメモリのマシンタイプに変更し、契約者ごとの通話記録の一覧をメモリ上で速く処理できるようにする"
+    d: "GroupByKey を CoGroupByKey に置き換えて、契約者 ID ごとの通話記録をまとめる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Combine.perKey（Python は CombinePerKey）を使うと、Dataflow はシャッフルの前に各ワーカーで部分的に合計（コンバイナ リフティング）するため、シャッフルされるデータ量が大きく減ります。"
+    b: "Reshuffle はシャッフルをもう1回追加するだけで、GroupByKey でシャッフルされるデータ量は減りません。"
+    c: "ワーカーのメモリを増やしても、シャッフルされるデータ量は変わりません。コストも増えます。"
+    d: "CoGroupByKey は複数の PCollection をキーで結合するための変換です。1つの PCollection の集計に使っても、すべての値がシャッフルされる点は変わりません。"
+  explanation: |
+    Beam の集計には **GroupByKey** と **Combine** があります。
+
+    | 変換 | 動作 | 向いている処理 |
+    | --- | --- | --- |
+    | GroupByKey | キーごとにすべての値を集めて、値の一覧を作る | 値の一覧そのものが必要な処理 |
+    | Combine.perKey | キーごとの値を1つの結果にまとめる | 合計、件数、最大値、平均など |
+
+    Combine で使う関数（CombineFn）は、**結合法則と交換法則** が成り立つ必要があります。そのため、Dataflow はシャッフルの前に各ワーカーで部分的に集計し、部分的な結果だけをシャッフルできます（**コンバイナ リフティング**）。
+
+    合計や件数のように値を1つにまとめる処理では、GroupByKey ＋ ParDo ではなく Combine を使うのが定石です。
+  references:
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+    - title: "パイプラインのライフサイクル"
+      url: "https://docs.cloud.google.com/dataflow/docs/pipeline-lifecycle"
+
+- id: ingest-dataflow-008
+  domain: ingest
+  services: [dataflow, cloud-storage, bigquery]
+  type: single
+  question: |
+    ある保険会社は、契約データ（数億件）と保険金の請求データ（数億件）を Cloud Storage から読み込み、契約 ID で結合して加工したうえで BigQuery に書き込む Dataflow のバッチ パイプラインを作成しています。どちらのデータも大きく、ワーカーのメモリには収まりません。結合した結果に対して、さらにパイプラインの中で複雑な加工を行います。
+
+    パイプラインの中で2つのデータを結合するには、どの方法を使うべきですか？
+  choices:
+    a: "両方のデータを契約 ID をキーにした PCollection に変換し、CoGroupByKey で結合する"
+    b: "契約データを副入力にして、請求データを処理する ParDo の中で契約 ID で参照する"
+    c: "2つの PCollection を Flatten で1つにまとめ、ParDo で契約 ID ごとに突き合わせる"
+    d: "請求データを処理する ParDo の中で、1件ごとに Cloud Storage から契約データを読む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。CoGroupByKey は、同じ型のキーを持つ複数の PCollection をキーでまとめ、キーごとにそれぞれの値の一覧を出力します。大きなデータ同士の結合に使います。"
+    b: "副入力は、各ワーカーで参照できる大きさのデータに向いています。ワーカーのメモリに収まらない数億件のデータには適しません。"
+    c: "Flatten は複数の PCollection を1つに連結するだけで、キーでまとめません。ParDo は要素を1件ずつ処理するため、契約 ID ごとの突き合わせはできません。"
+    d: "請求データ1件ごとに Cloud Storage を読むため、非常に遅くなります。数億件の処理には現実的ではありません。"
+  explanation: |
+    Beam でデータを結合する方法は、データの大きさで選びます。
+
+    | 方法 | 向いているケース |
+    | --- | --- |
+    | **CoGroupByKey** | 大きなデータ同士を共通のキーで結合する |
+    | **副入力** | 大きなデータに、小さな参照データ（マスタなど）を付け加える |
+
+    CoGroupByKey の結果は「キー → (A 側の値の一覧, B 側の値の一覧)」の形になります。どちらかの一覧が空のキーを捨てれば内部結合、残せば外部結合になります。
+
+    ストリーミングで CoGroupByKey を使う場合は、結合する PCollection のウィンドウをそろえる必要があります。
+  references:
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-009
+  domain: ingest
+  services: [dataflow, pubsub, cloud-storage, cloud-sql]
+  type: single
+  question: |
+    ある小売企業は、店舗の売上イベントを Pub/Sub から読み込む Dataflow のストリーミング パイプラインで、各イベントに店舗の地域や業態の情報を付け加えています。店舗マスタは数千件で、1日1回更新されたファイルが Cloud Storage に置かれます。パイプラインを止めずにマスタの更新を反映したいと考えています。また、イベントごとに外部のデータベースを呼び出す構成は避けたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "PeriodicImpulse などで定期的に店舗マスタを読み直し、その結果を副入力としてイベントを処理する ParDo に渡す"
+    b: "店舗マスタを Cloud SQL に移し、イベントを処理する ParDo の中で、イベントごとに店舗 ID で検索する"
+    c: "パイプラインの起動時に店舗マスタを読み込んで副入力にし、マスタが更新されるたびにジョブを置き換える"
+    d: "Cloud Storage の店舗マスタと Pub/Sub の売上イベントを、店舗 ID をキーにして CoGroupByKey で結合する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。一定間隔で生成した要素をきっかけにマスタを読み直し、その結果を副入力にすると、パイプラインを止めずに最新のマスタを参照できます（ゆっくり更新される副入力のパターン）。"
+    b: "イベントごとにデータベースを呼び出すため、レイテンシが増え、データベースの負荷も高くなります。要件に反します。"
+    c: "マスタの更新のたびにジョブの更新が必要になり、パイプラインを止めずに反映するという要件に合いません。運用の手間も増えます。"
+    d: "ストリーミングで CoGroupByKey を使うには、両方の PCollection のウィンドウをそろえる必要があります。1日1回しか更新されないマスタを毎秒届くイベントと同じウィンドウで突き合わせるのは困難です。"
+  explanation: |
+    **副入力（side input）** は、ParDo が各要素を処理するときに参照できる追加の入力です。小さな参照データで要素を拡充する処理に向いています。
+
+    ストリーミングで参照データを定期的に更新するには、**ゆっくり更新される副入力** のパターンを使います。
+
+    1. PeriodicImpulse（Java では GenerateSequence なども可）で、一定間隔ごとに要素を生成する
+    2. その要素を受けて、Cloud Storage などから最新のマスタを読み込む
+    3. 新しいマスタを読み込むたびに副入力が更新されるようにウィンドウとトリガーを設定し、副入力（Map や Dict の形）にする（Java の例では、グローバル ウィンドウと要素ごとに発火するトリガーを使う）
+    4. メインの ParDo で、副入力からキーを引いて拡充する
+
+    副入力は各ワーカーに配布されるため、**ワーカーで扱える大きさのデータ** に使います。大きなデータ同士の結合には CoGroupByKey を使います。
+  references:
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+
+- id: ingest-dataflow-010
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    あるクレジットカード会社は、Dataflow のストリーミング パイプラインで不正利用を検知しています。カード番号ごとに直前の取引の場所と時刻を保持し、新しい取引と比べて「短時間のうちに遠く離れた場所で利用された」ことを、取引が届いた時点で検知したいと考えています。カードの利用は不規則で、数日間取引がないカードもあります。保持した情報は、そのカードで30日間取引がなければ削除する必要があります。
+
+    どの方法で実装すべきですか？
+  choices:
+    a: "ステートフルな DoFn でカード番号ごとに直前の取引を保持し、最後の取引から30日後に発火するタイマーで削除する"
+    b: "カード番号ごとにギャップが30日のセッション ウィンドウを設定し、GroupByKey で取引をまとめてから比較する"
+    c: "すべてのカードの直前の取引を副入力にして、各取引を処理する ParDo の中でカード番号で参照する"
+    d: "1分の固定ウィンドウで取引をまとめ、同じウィンドウ内にある同じカードの取引同士を比較する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ステートフルな DoFn では、キーごとに値を保持して次の要素の処理で参照できます。取引のたびにタイマーを30日後に設定し直せば、30日間取引がないカードの状態を削除できます。"
+    b: "セッション ウィンドウの結果は、ウィンドウが閉じるまで確定しません。取引が届いた時点で検知するという要件に合わず、取引をすべて保持し続けるため効率も悪くなります。"
+    c: "副入力は別の PCollection から作る参照用のデータです。取引のたびに更新される直前の取引を、副入力で最新の状態に保つことはできません。"
+    d: "ウィンドウの境界をまたぐ取引や、日をまたいだ取引を比較できません。直前の取引と比べるという要件を満たせません。"
+  explanation: |
+    Beam の **状態（state）とタイマー（timer）** を使うと、キーごとに情報を保持しながら1件ずつ処理できます。
+
+    - **状態**: キー（とウィンドウ）ごとに値を保持する。`ValueState`（1つの値）、`BagState`（値の集まり）、`MapState` などがある
+    - **タイマー**: 指定した時刻にコールバックを呼び出す。イベント時刻のタイマーと処理時刻のタイマーがある
+
+    | 方法 | 向いている処理 |
+    | --- | --- |
+    | ウィンドウ ＋ 集計 | 時間の区切りごとの件数や合計 |
+    | ステートフルな DoFn | 直前の値との比較、キーごとの細かな制御、外部 API 呼び出しのまとめ処理 |
+
+    状態はキーとウィンドウの組ごとに保持されます。グローバル ウィンドウでは状態が自動では消えないため、この問題のように **タイマーで不要になった状態を削除** します。
+  references:
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+
+- id: ingest-dataflow-011
+  domain: ingest
+  services: [dataflow, pubsub]
+  type: single
+  question: |
+    あるモバイルゲーム会社は、プレイヤーの得点イベントを Pub/Sub 経由で Dataflow に送り、1時間の固定ウィンドウでチーム別の得点を集計しています。端末がオフラインの間に発生したイベントは、通信が回復してからまとめて送信されます。現在は Pub/Sub へのパブリッシュ時刻が要素のタイムスタンプになっているため、得点がイベントの発生した時間帯ではなく、送信された時間帯に集計されています。各イベントの発生時刻は、端末がメッセージ属性 event_time に設定しています。
+
+    イベントが発生した時間帯で正しく集計するには、どうすればよいですか？
+  choices:
+    a: "PubsubIO の読み取りで event_time をタイムスタンプ属性に指定し、イベント時刻でウィンドウに割り当てる"
+    b: "固定ウィンドウのトリガーを処理時刻に基づいて発火するものに変更し、Dataflow が受信した順に集計する"
+    c: "ウィンドウを長さ1時間・間隔5分のスライディング ウィンドウに変更し、遅れて届いたイベントも拾えるようにする"
+    d: "読み取りの後の ParDo で event_time を読み取って各要素のタイムスタンプを書き換え、その後で固定ウィンドウに割り当てる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。タイムスタンプ属性（Java は withTimestampAttribute、Python は timestamp_attribute）を指定すると、要素のタイムスタンプがイベント時刻になり、ウォーターマークもイベント時刻に基づいて計算されます。"
+    b: "処理時刻で集計すると、イベントが発生した時間帯ではなく、届いた時間帯で集計されます。要件に反します。"
+    c: "ウィンドウの形を変えても、要素のタイムスタンプがパブリッシュ時刻のままなので、発生した時間帯で集計されない問題は解決しません。"
+    d: "ウォーターマークはパブリッシュ時刻に基づいて進むため、過去の時刻に書き換えた要素はウォーターマークより遅れた遅延データとして扱われ、破棄されるおそれがあります。"
+  explanation: |
+    ストリーミング処理では、2つの時刻を区別します。
+
+    | 時刻 | 意味 | 例 |
+    | --- | --- | --- |
+    | **イベント時刻** | データが実際に発生した時刻 | 得点した時刻、センサーの計測時刻 |
+    | **処理時刻** | パイプラインがデータを処理した時刻 | Dataflow のワーカーが処理した時刻 |
+
+    発生した時間帯で集計したい場合は、**イベント時刻** でウィンドウに割り当てます。
+
+    - Pub/Sub から読み込んだ要素のタイムスタンプは、既定では **パブリッシュ時刻**
+    - メッセージ属性にイベント時刻を入れ、PubsubIO で **タイムスタンプ属性** として指定すると、その値が要素のタイムスタンプになる
+    - Dataflow は、この属性の値をもとに **ウォーターマーク** を推定する
+
+    オフラインの端末のように大きく遅れて届くデータは、ウォーターマークを過ぎると遅延データになります。必要に応じて許容される遅延（allowed lateness）も設定します。
+  references:
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+    - title: "Pub/Sub を使用したストリーミング"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-with-cloud-pubsub"
+
+- id: ingest-dataflow-012
+  domain: ingest
+  services: [dataflow]
+  type: multiple
+  question: |
+    ある動画配信サービスは、視聴イベントを Dataflow のストリーミング パイプラインで集計しています。イベントのタイムスタンプには、視聴操作が行われた時刻が設定されています。
+
+    次の集計の要件と、使用するウィンドウの組み合わせのうち、適切なものはどれですか？
+  choices:
+    a: "直近10分間の平均同時視聴者数を1分ごとに更新する：長さ10分・間隔1分のスライディング ウィンドウ"
+    b: "操作が30分途切れるまでを1回の視聴として、ユーザーごとに集計する：ギャップ30分のセッション ウィンドウ"
+    c: "毎時0分から1時間ごとの再生回数を、重なりなく集計する：ギャップ1時間のセッション ウィンドウ"
+    d: "期間で区切らずに、ユーザーごとの累計視聴時間を一定間隔で出力する：長さ1日の固定ウィンドウ"
+    e: "5分ごとの再生エラーの件数を集計してアラートに使う：既定のトリガーのままのグローバル ウィンドウ"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。スライディング ウィンドウは、長さと間隔を指定し、重なり合うウィンドウを作ります。移動平均のように「直近の一定期間」を定期的に計算する処理に向いています。"
+    b: "正解です。セッション ウィンドウは、キーごとに、指定したギャップ以上データが途切れるまでを1つのウィンドウにします。ユーザーの一連の操作の集計に向いています。"
+    c: "毎時0分から区切って重なりなく集計するには、長さ1時間の固定ウィンドウを使います。セッション ウィンドウは、データの間隔によって区切りの位置と長さが変わります。"
+    d: "期間で区切らない累計には、グローバル ウィンドウと、一定間隔で発火するトリガーを使います。1日の固定ウィンドウでは、日ごとに集計がリセットされます。"
+    e: "境界のないデータでは、グローバル ウィンドウの既定のトリガーが発火する時点が来ないため、このままでは集計できません（GroupByKey などはパイプラインの構築時にエラーになります）。5分ごとの集計には長さ5分の固定ウィンドウを使います。"
+  explanation: |
+    Beam の4種類のウィンドウを整理します。
+
+    | ウィンドウ | 区切り方 | 代表的な用途 |
+    | --- | --- | --- |
+    | **固定（タンブリング）** | 一定の長さで、重なりなく区切る | 1時間ごとの件数、日次の集計 |
+    | **スライディング（ホッピング）** | 長さと間隔を指定し、重なり合う | 直近 N 分の移動平均 |
+    | **セッション** | キーごとに、ギャップ以上の空白で区切る | ユーザーの訪問やプレイのまとまり |
+    | **グローバル** | 区切らない（既定） | バッチ処理、トリガーと組み合わせた累計 |
+
+    ストリーミングでグローバル ウィンドウを使う場合は、要素数や処理時刻で発火する **トリガー** を必ず設定します。
+  references:
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-013
+  domain: ingest
+  services: [dataflow, pubsub]
+  type: single
+  question: |
+    ある建設機械メーカーは、稼働中の機械から送られる稼働イベントを Dataflow のストリーミング パイプラインで受け取り、イベント時刻の15分の固定ウィンドウで現場ごとの稼働時間を集計しています。山間部の現場では通信が途切れることがあり、イベントが最大2時間遅れて届きます。現在、こうして遅れて届いたイベントが集計に含まれていません。2時間以内に届いたイベントは、集計結果に反映したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "ウィンドウに2時間の許容される遅延を設定し、遅延データが届くたびに発火する遅延トリガーを追加する"
+    b: "ウィンドウの長さを2時間15分に広げて、遅れて届くイベントも、本来のイベントと同じウィンドウに入るようにする"
+    c: "要素のタイムスタンプを処理時刻に変更し、遅れて届いたイベントは届いた時刻のウィンドウで集計するようにする"
+    d: "Pub/Sub のサブスクリプションの確認応答期限を延ばし、遅れて届くイベントを待ってから処理するようにする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。許容される遅延（allowed lateness）を設定すると、ウォーターマークがウィンドウの終わりを過ぎた後も、その期間はウィンドウの状態が保持されます。遅延データで発火するトリガーで、遅れて届いたイベントを反映した結果を出力できます。"
+    b: "集計の単位が15分から変わってしまい、要件に反します。ウォーターマークより遅れて届いたイベントは、ウィンドウを広げても遅延データとして扱われます。"
+    c: "イベントが発生した時間帯ではなく、届いた時間帯で集計されるため、現場ごとの稼働時間が正しく集計されません。"
+    d: "イベントは Pub/Sub に届く時点ですでに遅れています。確認応答期限は再配信までの時間で、遅延データの扱いには関係しません。"
+  explanation: |
+    **ウォーターマーク** は、「この時刻より前のイベントはほぼすべて届いた」というパイプラインの推定です。ウォーターマークがウィンドウの終わりを過ぎてから届いた要素を **遅延データ** と呼びます。
+
+    - 既定の **許容される遅延は 0** で、遅延データは破棄される
+    - `withAllowedLateness`（Python は `allowed_lateness`）で期間を指定すると、その間はウィンドウの状態が保持され、遅延データを集計に含められる
+    - 遅延データで結果を出し直すには、`withLateFirings` などの **遅延トリガー** を設定する
+    - 許容される遅延を過ぎて届いたデータは破棄される
+
+    出し直した結果に、それまでの値を含めるか（累積モード）、差分だけにするか（破棄モード）も、書き込み先に合わせて選びます。許容される遅延を長くするほど、保持する状態が増える点にも注意します。
+  diagram: |
+    flowchart TD
+      W["ウィンドウ<br/>10:00〜10:15"] --> M["ウォーターマークが<br/>10:15 を通過"]
+      M -->|定刻の発火| R1["集計結果を出力"]
+      M --> L{"遅れて届いた<br/>イベント"}
+      L -->|2時間以内| R2["遅延トリガーで<br/>結果を出し直す"]
+      L -->|2時間を超過| X["破棄"]
+  references:
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-014
+  domain: ingest
+  services: [dataflow, bigtable]
+  type: multiple
+  question: |
+    あるニュースメディアは、記事の閲覧イベントを Dataflow のストリーミング パイプラインで集計し、記事ごとの1時間の固定ウィンドウの閲覧数を Bigtable に書き込んでいます。書き込みでは、記事とウィンドウの組ごとの行を毎回上書きします。編集部のダッシュボードは Bigtable の値をそのまま表示しています。ウィンドウが閉じるまで1時間待たずに、途中経過を約1分ごとに表示したいと考えています。ダッシュボードと Bigtable のスキーマは変更しないものとします。
+
+    どの設定を組み合わせるべきですか？
+  choices:
+    a: "ウォーターマークがウィンドウの終わりを過ぎたときに発火するトリガーに、処理時刻で1分ごとの早期発火を追加する"
+    b: "発火した結果に、そのウィンドウでそれまでに集計したすべての値を含める累積モード（accumulating）を使う"
+    c: "発火した結果に、前回の発火以降に届いた値だけを含める破棄モード（discarding）を使う"
+    d: "1分の固定ウィンドウに変更し、1時間分の60個の結果を Bigtable の別々の行に書き込む"
+    e: "許容される遅延を1分に設定し、ウィンドウの途中経過を遅延データとして1分ごとに出力する"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。早期発火（Java は withEarlyFirings、Python は early 引数）に処理時刻のトリガーを指定すると、ウィンドウが閉じる前にも途中経過を出力できます。"
+    b: "正解です。書き込みのたびに行を上書きするため、各発火の結果はそのウィンドウの累計である必要があります。累積モードを使うと、発火のたびにそれまでの値を含めた結果が出力されます。"
+    c: "破棄モードでは、発火ごとに前回からの差分だけが出力されます。上書きで書き込むと、ダッシュボードに差分だけが表示されてしまいます。"
+    d: "Bigtable の行の持ち方とダッシュボードの集計方法が変わるため、スキーマとダッシュボードを変更しないという要件に反します。"
+    e: "許容される遅延は、ウォーターマークを過ぎて届いたデータをどのくらいの期間受け付けるかの設定です。ウィンドウが閉じる前の途中経過を出力する機能ではありません。"
+  explanation: |
+    **トリガー** は、ウィンドウの結果をいつ出力するかを決めます。
+
+    | 発火の種類 | タイミング | 設定の例 |
+    | --- | --- | --- |
+    | 早期発火 | ウォーターマークがウィンドウの終わりに達する前 | 処理時刻で1分ごと、要素100件ごと |
+    | 定刻の発火 | ウォーターマークがウィンドウの終わりを過ぎたとき | `AfterWatermark.pastEndOfWindow()` |
+    | 遅延発火 | 許容される遅延の間に遅延データが届いたとき | 遅延データ1件ごと |
+
+    1つのウィンドウで複数回発火する場合は、発火した結果に何を含めるか（accumulation mode）を選びます。
+
+    - **累積モード（accumulating）**: 毎回、それまでのすべての値を含めて出力する。書き込み先で **上書き** する場合に使う
+    - **破棄モード（discarding）**: 毎回、前回からの差分だけを出力する。書き込み先で **加算** する場合に使う
+  references:
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-015
+  domain: ingest
+  services: [dataflow, pubsub]
+  type: single
+  question: |
+    あるスマートホーム機器メーカーのエンジニアは、センサーの計測値をデバイス ID ごとに GroupByKey でまとめる Apache Beam のパイプラインを作成しました。Cloud Storage のファイルを読むバッチ処理のテストでは正常に動きました。ところが、入力を Pub/Sub からの読み取りに変えて Dataflow で起動しようとすると、パイプラインの構築時にエラーになりました。ウィンドウとトリガーは設定していません。
+
+    原因と対処として正しいものはどれですか？
+  choices:
+    a: "境界のない PCollection に、既定のグローバル ウィンドウと既定のトリガーのまま GroupByKey を適用しているため、その前にウィンドウかトリガーを設定する"
+    b: "ストリーミングでは GroupByKey を使えないため、デバイス ID ごとの処理を Combine.globally に置き換えて、全体を1つの結果にまとめる"
+    c: "Pub/Sub から読み込んだ要素にはキーが付いていないため、GroupByKey の前に Reshuffle を挿入して、要素にキーを付ける"
+    d: "ストリーミングで GroupByKey を使うには Streaming Engine が必須のため、パイプライン オプションで Streaming Engine を有効にする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。グローバル ウィンドウの既定のトリガーは、ウィンドウの終わり（つまりデータの終わり）で発火します。境界のないデータでは終わりが来ないため、Beam はこの組み合わせの GroupByKey をエラーにします。"
+    b: "ストリーミングでも、ウィンドウかトリガーを設定すれば GroupByKey を使えます。Combine.globally にしても、同じくウィンドウかトリガーの設定が必要で、デバイス ID ごとの集計もできなくなります。"
+    c: "Reshuffle は要素の分散のために使う変換で、キーを付ける機能ではありません。キーは ParDo や WithKeys で付けます。エラーの原因も別にあります。"
+    d: "GroupByKey は Streaming Engine を使わなくても動きます。エラーの原因は、ウィンドウとトリガーの設定がないことです。"
+  explanation: |
+    バッチとストリーミングで同じコードを使うときに、よくつまずく点です。
+
+    - PCollection の既定のウィンドウは **グローバル ウィンドウ**、既定のトリガーは **ウォーターマークがウィンドウの終わりを過ぎたら1回発火**
+    - 境界のあるデータ（バッチ）では、すべて読み終えた時点で発火するため問題ない
+    - 境界のないデータ（ストリーミング）では発火する時点が来ないため、GroupByKey や Combine の前に、次のどちらかを設定する
+      - 固定・スライディング・セッションなどの **ウィンドウ**
+      - グローバル ウィンドウのまま、要素数や処理時刻で発火する **トリガー**
+
+    バッチとストリーミングで共通の PTransform を作るときは、ウィンドウの設定を入力に合わせて切り替えられるようにしておきます。
+  references:
+    - title: "ストリーミング パイプライン"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-pipelines"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-016
+  domain: ingest
+  services: [dataflow, pubsub, bigquery]
+  type: single
+  question: |
+    あるフードデリバリー企業は、アプリの操作イベントを Pub/Sub から Dataflow で読み取り、項目の形式をそろえて BigQuery に書き込んでいます。パイプラインは要素ごとの変換だけで、集計や結合は行っていません。各イベントには一意のイベント ID があり、分析用のクエリでは常にイベント ID で重複を除いています。このパイプラインのレイテンシとコストを、できるだけ下げたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "ストリーミング モードを at-least-once に切り替え、BigQuery への書き込みも at-least-once 方式にする"
+    b: "FlexRS（Flexible Resource Scheduling）を有効にして、ワーカーの一部にプリエンプティブル VM を使い、コストを下げる"
+    c: "パイプラインに Deduplicate 変換を追加し、BigQuery に書き込む前に、イベント ID でパイプラインの中で重複を除く"
+    d: "Streaming Engine を無効にして、シャッフルと状態の処理をワーカー VM の中で行わせ、バックエンドの処理を減らす"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。at-least-once（少なくとも1回）モードでは、重複を排除するための処理が省かれるため、exactly-once（1回限り）モードよりレイテンシとコストを下げられます。重複を許容できる、要素ごとの変換だけのパイプラインに向いています。"
+    b: "FlexRS はバッチジョブ向けの機能で、ストリーミング ジョブでは使えません。"
+    c: "重複の排除はクエリ側ですでに行っています。パイプラインで重複を除くと、キーごとの状態の保持が増え、レイテンシとコストはかえって上がります。"
+    d: "Streaming Engine を無効にすると、ワーカーに大きなディスクとメモリが必要になり、オートスケーリングの反応も遅くなります。レイテンシとコストを下げる対策になりません。"
+  explanation: |
+    Dataflow のストリーミング ジョブには、2つの **ストリーミング モード** があります。
+
+    | モード | 保証 | 向いているケース |
+    | --- | --- | --- |
+    | 1回限り（exactly-once、既定） | 各レコードの処理結果が1回だけ反映される | 集計や結合を含み、重複が結果を狂わせる処理 |
+    | 少なくとも1回（at-least-once） | 各レコードは1回以上処理される（重複がありうる） | 要素ごとの変換だけで、重複を許容できる、または下流で除ける処理 |
+
+    少なくとも1回のモードは、ジョブの起動時にサービス オプション（Java は `--dataflowServiceOptions=streaming_mode_at_least_once`）で指定します。
+
+    パイプラインのモードと、入出力のコネクタの方式はそろえます。BigQuery への書き込みは、重複を許容するなら Storage Write API の **at-least-once 方式**（`STORAGE_API_AT_LEAST_ONCE`）が、レイテンシとコストの面で有利です。
+  references:
+    - title: "パイプラインのストリーミング モードを設定する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/streaming-modes"
+    - title: "Dataflow での 1 回限りの処理"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/exactly-once"
+    - title: "Dataflow から BigQuery に書き込む"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/write-to-bigquery"
+
+- id: ingest-dataflow-017
+  domain: ingest
+  services: [dataflow, pubsub]
+  type: single
+  question: |
+    ある物流企業は、配送ドライバーの端末から送られるステータス更新を Pub/Sub で受け取り、Dataflow で処理しています。端末のアプリは、応答がないと同じ内容を再送する仕様のため、同じ更新が別のメッセージとして数分以内に Pub/Sub に重複して届くことがあります。メッセージ本文の JSON には一意の update_id が含まれていますが、メッセージ属性には含まれていません。端末のアプリは外部の会社が開発しており、変更できません。パイプラインの中で重複を除きたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Dataflow は Pub/Sub のメッセージ ID で重複を自動的に除くため、パイプラインには追加の対応をしない"
+    b: "本文の update_id をキーにして、Apache Beam の Deduplicate 変換を適用する"
+    c: "PubsubIO の読み取りで ID 属性として update_id を指定し、Dataflow に重複を除かせる"
+    d: "Pub/Sub のサブスクリプションで1回限りの配信（exactly-once delivery）を有効にする"
+  answer: [b]
+  choiceNotes:
+    a: "Dataflow が自動で除くのは、同じメッセージ ID の重複（Pub/Sub の再配信など）です。端末が再送したメッセージは別のメッセージ ID になるため、除かれません。"
+    b: "正解です。Deduplicate 変換は、キーごとの状態を使い、一定期間内に同じキーの要素が再び届いた場合に2件目以降を除きます。本文の update_id をキーにすれば、再送による重複を除けます。"
+    c: "ID 属性による重複排除は、パブリッシャーがメッセージ属性に一意の ID を設定している場合に使えます。update_id は本文にしかなく、アプリも変更できないため使えません。"
+    d: "1回限りの配信は、確認応答したメッセージが再配信されないことを保証する機能です。パブリッシャーが送った重複メッセージは別のメッセージとして扱われ、除かれません。"
+  explanation: |
+    重複には発生する場所によって種類があり、対策が異なります。
+
+    | 重複の原因 | メッセージ ID | 対策 |
+    | --- | --- | --- |
+    | Pub/Sub の再配信 | 同じ | Dataflow がメッセージ ID で自動的に除く |
+    | パブリッシャーの再送（ID を属性に設定できる） | 異なる | PubsubIO の **ID 属性**（Java は `withIdAttribute`、Python は `id_label`）を指定する |
+    | パブリッシャーの再送（ID が本文にしかない） | 異なる | 本文から ID を取り出し、Beam の **Deduplicate** 変換で除く |
+
+    Deduplicate 変換は、キーごとの状態を使って一定期間内の重複を除きます。期間を長くするほど保持する状態が増えるため、重複が届きうる時間に合わせて設定します。期間を超えて届く重複は、書き込み先（BigQuery の MERGE など）で除きます。
+  references:
+    - title: "Dataflow での 1 回限りの処理"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/exactly-once"
+    - title: "Pub/Sub を使用したストリーミング"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-with-cloud-pubsub"
+
+- id: ingest-dataflow-018
+  domain: ingest
+  services: [dataflow, pubsub, bigquery, cloud-storage]
+  type: multiple
+  question: |
+    ある旅行会社は、提携先のシステムから Pub/Sub に送られる予約データ（JSON）を Dataflow で解析し、BigQuery に書き込んでいます。ときどき、JSON の形式が壊れたメッセージや、BigQuery のテーブルのスキーマに合わない値を含むメッセージがあり、パイプラインがエラーを繰り返して処理が滞ることがあります。正常なデータの処理を止めずに、失敗したデータを後から調査・再処理できるようにしたいと考えています。
+
+    どの対応を組み合わせるべきですか？
+  choices:
+    a: "解析を行う ParDo で例外を捕捉し、失敗した要素を元のメッセージとエラー内容とともに追加の出力に振り分けて保存する"
+    b: "BigQueryIO の書き込み結果から書き込みに失敗した行を取得し、エラー内容とともに別のテーブルなどに書き込む"
+    c: "Pub/Sub のサブスクリプションにデッドレター トピックを設定し、Dataflow で処理に失敗したメッセージを転送させる"
+    d: "解析を行う ParDo で例外が発生した要素は捨てるようにし、Cloud Logging にはエラーの件数だけを記録する"
+    e: "Dataflow のジョブで要素ごとの再試行回数の上限を設定し、上限を超えた要素を Dataflow に自動で破棄させる"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。ParDo で複数の出力（Java は TupleTag、Python は with_outputs）を使い、失敗した要素をデッドレター用の出力に分けると、正常な要素の処理を続けながら、失敗したデータを Cloud Storage や BigQuery に保存できます。"
+    b: "正解です。Storage Write API などで書き込みに失敗した行は、BigQueryIO の書き込み結果から PCollection として取り出せます。これを別のシンクに書けば、スキーマに合わない行も後から調査できます。"
+    c: "Dataflow は、Pub/Sub から読み込んだメッセージを永続化した時点で確認応答するため、Pub/Sub のデッドレター トピックは Dataflow では十分にサポートされていません。後の処理で失敗しても、メッセージはデッドレター トピックに転送されません。"
+    d: "失敗したデータが残らないため、後から調査・再処理するという要件を満たせません。"
+    e: "Dataflow のストリーミング ジョブでは、失敗した要素を含む処理は無期限に再試行され、要素を自動で破棄する設定はありません。失敗した要素はパイプラインの中で処理します。"
+  explanation: |
+    **デッドレター パターン** は、処理できない要素を正常な流れから分けて保存する設計です。Dataflow では、パイプラインの中で実装します。
+
+    - **解析・変換の失敗**: ParDo の中で例外を捕捉し、追加の出力（タグ付き出力）に振り分ける
+    - **書き込みの失敗**: BigQueryIO の書き込み結果から失敗した行を取り出し、エラー用のテーブルなどに書く
+    - 保存するデータには、**元のメッセージ・エラー内容・発生時刻** を含めると、原因の調査と再処理がしやすくなる
+
+    ストリーミング ジョブで例外を放置すると、その要素を含む処理が無期限に再試行され、パイプライン全体が滞る原因になります。
+
+    Pub/Sub のデッドレター トピックは、サブスクライバーが自分で確認応答する構成（Cloud Run の push サブスクリプションなど）で使う機能です。Dataflow のパイプラインでは十分に機能しないため、上のようにパイプラインの中で実装します。
+  diagram: |
+    flowchart TD
+      P["Pub/Sub"] --> A["ParDo<br/>JSON の解析"]
+      A -->|成功| W["BigQueryIO<br/>書き込み"]
+      A -->|失敗| E["デッドレター出力"]
+      W --> B["BigQuery<br/>予約テーブル"]
+      W -->|書き込み失敗の行| E
+      E --> G["エラー用テーブル<br/>Cloud Storage"]
+  references:
+    - title: "Dataflow から BigQuery に書き込む"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/write-to-bigquery"
+    - title: "Pub/Sub を使用したストリーミング"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/streaming-with-cloud-pubsub"
+    - title: "Dataflow エラーのトラブルシューティング"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/common-errors"
+
+- id: ingest-dataflow-019
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    あるライブ配信サービスは、視聴者のコメントやギフトのイベントを Dataflow のストリーミング パイプラインで集計しています。イベントの量は人気配信者の配信開始時に急増しますが、水平オートスケーリングの反応が遅く、処理の遅れが発生しています。また、大きなウィンドウの状態を保持するために、ワーカーには大きな永続ディスクとメモリを割り当てています。パイプラインのコードは変更せずに、スケーリングの反応を改善し、ワーカーのリソースを減らしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Streaming Engine を有効にして、状態の保存とストリーミングのシャッフルを Dataflow のバックエンドに移す"
+    b: "最大ワーカー数を引き上げ、ワーカーのマシンタイプもメモリの多いハイメモリのものに変更して余裕を持たせる"
+    c: "Dataflow Shuffle を有効にして、GroupByKey のシャッフルを Dataflow のバックエンドで実行させる"
+    d: "パイプラインをバッチジョブに変更し、Cloud Scheduler で5分ごとに起動して集計させる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Streaming Engine は、状態の保存とストリーミングのシャッフルをワーカー VM から Dataflow のバックエンドに移します。ワーカーの CPU・メモリ・永続ディスクの消費が減り、データ量の変化に対するオートスケーリングの反応もよくなります。"
+    b: "ワーカーのリソースを減らすという要件に反し、コストも増えます。状態をワーカーで保持する構成のため、スケーリングの反応も大きくは改善しません。"
+    c: "Dataflow Shuffle はバッチジョブ向けの機能です。ストリーミング ジョブでシャッフルをバックエンドに移すのは Streaming Engine です。"
+    d: "パイプラインの構成とコードの変更が必要で、要件に反します。5分ごとの起動では、リアルタイムの集計もできなくなります。"
+  explanation: |
+    **Streaming Engine** は、ストリーミング ジョブの処理の一部をワーカー VM から Dataflow のサービス側に移す機能です。
+
+    - ワーカーの **CPU・メモリ・永続ディスク** の消費が減り、小さなマシンタイプで動かせる
+    - 入力データ量の変化に対する **水平オートスケーリングの反応** がよくなる
+    - サービスの更新を、パイプラインを再デプロイせずに受けられる
+
+    | 処理 | バッチジョブ | ストリーミング ジョブ |
+    | --- | --- | --- |
+    | シャッフルをバックエンドで行う機能 | Dataflow Shuffle | Streaming Engine |
+
+    水平オートスケーリングは、バックログや CPU 使用率などをもとにワーカー数を増減します。上限は最大ワーカー数（`--maxNumWorkers`）で指定します。
+  references:
+    - title: "Streaming Engine を使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/streaming-engine"
+    - title: "水平自動スケーリング"
+      url: "https://docs.cloud.google.com/dataflow/docs/horizontal-autoscaling"
+
+- id: ingest-dataflow-020
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    ある銀行のデータ基盤チームは、夜間に数十 TB の取引データを結合・集計するバッチ処理を、オンプレミスの Hadoop から Dataflow に移行しています。チームのメンバーは、Hadoop と同じように、シャッフル用に大きなディスクをワーカーに割り当てる必要があると考えています。
+
+    Dataflow のバッチジョブのシャッフルについて、正しい説明はどれですか？
+  choices:
+    a: "Dataflow Shuffle はシャッフルをワーカー VM からバックエンドに移すため、ワーカーのディスクの消費が減り、障害にも強くなる"
+    b: "Hadoop と同じく、シャッフルは常にワーカー VM の永続ディスク上で行われるため、データ量に合わせて大きなディスクを割り当てる必要がある"
+    c: "Dataflow Shuffle はストリーミング ジョブ専用の機能で、バッチジョブのシャッフルは常にワーカー VM の中で行われる"
+    d: "Dataflow Shuffle を使うと、GroupByKey が自動的に Combine に書き換えられ、シャッフルされるデータ量そのものが減る"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataflow Shuffle を使うと、シャッフルのデータはワーカー VM ではなくバックエンドで保持されます。多くのバッチジョブで実行時間が短くなり、シャッフルのデータを持つワーカーに障害が起きても、ジョブ全体が失敗しにくくなります。"
+    b: "Dataflow Shuffle を使うバッチジョブでは、シャッフルはワーカー VM の外で行われるため、シャッフル用の大きなディスクは不要です。"
+    c: "Dataflow Shuffle はバッチジョブ向けの機能です。ストリーミング ジョブで同様の役割を持つのは Streaming Engine です。"
+    d: "Dataflow Shuffle はシャッフルを実行する場所を変える機能で、変換を書き換えることはありません。データ量を減らすには、コードで Combine を使います。"
+  explanation: |
+    **Dataflow Shuffle** は、バッチジョブの GroupByKey などで発生するシャッフルを、ワーカー VM からサービス側のバックエンドに移す機能です。バッチジョブでは既定で使われます。
+
+    - 多くのバッチジョブで **実行時間が短く** なる
+    - ワーカーの **CPU・メモリ・永続ディスク** の消費が減る
+    - **水平オートスケーリング** がよく効く
+    - シャッフルのデータを持つワーカーに障害が起きても、ジョブ全体が失敗しにくい（**耐障害性**）
+
+    Hadoop や Spark のクラスタのように、シャッフル用のディスクを見積もって割り当てる設計は不要です。Dataflow Shuffle を使わないバッチジョブでは、ワーカー同士が TCP 12346 で通信してシャッフルを行うため、ファイアウォール ルールの設定も必要になります。
+  references:
+    - title: "バッチジョブ向けの Dataflow Shuffle"
+      url: "https://docs.cloud.google.com/dataflow/docs/shuffle-for-batch"
+
+- id: ingest-dataflow-021
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    あるチケット販売サービスは、購入イベントを Dataflow のストリーミング パイプラインで処理しています。人気公演の発売時には一部のステップで要素ごとのメモリ使用量が大きく増え、ワーカーがメモリ不足（OOM）で再起動を繰り返します。一方、メモリの多いマシンタイプに固定すると、普段はメモリの大半が使われず、コストが無駄になります。負荷に応じて、ワーカーのメモリを自動で調整したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Dataflow Prime を有効にして、垂直オートスケーリングでワーカーのメモリを調整させる"
+    b: "最大ワーカー数を引き上げて、発売時に水平オートスケーリングでワーカーの台数を自動で増やせるようにする"
+    c: "ワーカーをハイメモリのマシンタイプに変更して、発売時に備えて常にメモリに余裕を持たせる"
+    d: "Streaming Engine を無効にして、ウィンドウの状態をワーカーのメモリ上で保持するようにする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataflow Prime の垂直オートスケーリングは、ワーカーのメモリ使用状況に応じてメモリの量を自動で調整し、メモリ不足を防ぎながら無駄も減らします。"
+    b: "水平オートスケーリングはワーカーの台数を増やす機能で、1台あたりのメモリは変わりません。要素ごとのメモリ使用量が大きいことによるメモリ不足は解消しません。"
+    c: "普段はメモリの大半が使われず、コストが無駄になるという課題が解決しません。負荷に応じて自動で調整するという要件にも合いません。"
+    d: "状態をワーカーで保持すると、ワーカーのメモリとディスクの負担はかえって増えます。メモリ不足の対策になりません。"
+  explanation: |
+    **Dataflow Prime** は、Dataflow のリソース管理を自動化する実行基盤です。ジョブの起動時にサービス オプション（Java は `--dataflowServiceOptions=enable_prime`）で有効にします。
+
+    | 機能 | 内容 |
+    | --- | --- |
+    | **垂直オートスケーリング** | ワーカーのメモリを、使用状況に応じて自動で増減する |
+    | **ライトフィッティング** | リソース ヒントで、ステップごとに必要なメモリや GPU などを指定する |
+
+    オートスケーリングの使い分け:
+
+    - **水平オートスケーリング**: ワーカーの **台数** を増減する。バックログの増加や CPU 不足に対応する
+    - **垂直オートスケーリング**: ワーカーの **メモリ** を増減する。メモリ不足や、メモリの過剰な割り当てに対応する
+
+    両者は組み合わせて動作します。
+  references:
+    - title: "垂直自動スケーリング"
+      url: "https://docs.cloud.google.com/dataflow/docs/vertical-autoscaling"
+    - title: "Dataflow Prime を使用する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/enable-dataflow-prime"
+
+- id: ingest-dataflow-022
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    ある SNS 企業は、投稿への「いいね」のイベントを Dataflow のストリーミング パイプラインで集計し、Combine.perKey で投稿 ID ごとの件数を計算しています。有名人の投稿にイベントが集中すると、特定のワーカーだけが高負荷になって処理が遅れ、Dataflow のログにホットキーが検出されたというメッセージが出ます。
+
+    処理の偏りを解消するには、どうすればよいですか？
+  choices:
+    a: "Combine.perKey に withHotKeyFanout を指定し、ホットキーの集計を複数の中間キーに分散させる"
+    b: "Combine.perKey を GroupByKey と ParDo に置き換えて、投稿 ID ごとの値をまとめて処理する"
+    c: "最大ワーカー数を引き上げて、水平オートスケーリングでワーカーの台数を増やせるようにする"
+    d: "Combine.perKey の前に Reshuffle を挿入して、要素をワーカー間に均等に分散させる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。withHotKeyFanout（Python は with_hot_key_fanout）を指定すると、同じキーの値をいったん複数の中間キーに分けて部分的に集計し、その結果を元のキーでまとめます。1台のワーカーへの集中を避けられます。"
+    b: "GroupByKey ではキーごとのすべての値が1か所に集まるため、偏りはさらに悪化します。"
+    c: "同じキーの集計は1台のワーカーで行われるため、ワーカーを増やしても、ホットキーを処理するワーカーの負荷は下がりません。"
+    d: "Reshuffle で要素を分散しても、Combine.perKey で同じキーの値は再び1か所に集まります。ホットキーの偏りは解消しません。"
+  explanation: |
+    **ホットキー** は、特定のキーに要素が集中し、そのキーを処理するワーカーだけが高負荷になる状態です。キーごとの集計は1台のワーカーで行われるため、ワーカーを増やしても解消しません。
+
+    対策:
+
+    - Combine の **ホットキー ファンアウト**（`withHotKeyFanout` / `with_hot_key_fanout`）で、集計を中間キーに分散する
+    - 偏りの少ないキーを設計する（例: キーに乱数の接尾辞を付けて2段階で集計する）
+    - 不要な値（null や「不明」など）にキーが集中していないか確認する
+
+    Dataflow のログに出るホットキーのメッセージで偏りに気付けます。ホットキーのログ出力を有効にするパイプライン オプションを指定すると、検出されたキーの値もログに出力されます。
+  references:
+    - title: "Dataflow エラーのトラブルシューティング"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/common-errors"
+    - title: "Apache Beam のプログラミング モデル"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/beam-programming-model"
+
+- id: ingest-dataflow-023
+  domain: ingest
+  services: [dataflow, cloud-storage]
+  type: single
+  question: |
+    ある研究機関は、Cloud Storage にある約100個の圧縮アーカイブ（1個あたり数百万件の測定レコード）を、Dataflow のバッチ パイプラインで処理しています。パイプラインは、アーカイブのパスの一覧を読み込み、ParDo で各アーカイブを展開してレコードを出力し、続く ParDo で各レコードに計算量の多い変換を行います。最大ワーカー数を増やしても処理が速くならず、ほとんどのワーカーが待機状態になっています。
+
+    どうすればよいですか？
+  choices:
+    a: "アーカイブを展開する ParDo の直後に Reshuffle を挿入し、融合を防ぐ"
+    b: "最大ワーカー数をさらに引き上げ、ワーカーのマシンタイプも大きなものに変更する"
+    c: "展開と変換を1つの ParDo にまとめて、ステップ間のデータの受け渡しをなくす"
+    d: "計算量の多い変換を行う ParDo を、Combine.globally を使う処理に置き換える"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Reshuffle で融合を切ると、展開で生まれた大量のレコードがワーカー間に再分配され、後続の重い変換を多くのワーカーで並列に処理できます。"
+    b: "並列度はパスの数（約100）で頭打ちになっているため、ワーカーを増やしても待機するワーカーが増えるだけです。"
+    c: "展開と変換を1つの ParDo にまとめても、1つのアーカイブを1つのワーカーで処理する構成は変わらず、並列度は上がりません。"
+    d: "各レコードを変換する処理は集計ではないため、Combine には置き換えられません。並列度の問題も解決しません。"
+  explanation: |
+    Dataflow は、連続する ParDo などのステップを1つにまとめて実行する **融合（fusion）** という最適化を行います。ステップ間のデータの受け渡しが減り、通常は効率がよくなります。
+
+    ただし、**少数の要素から大量の要素を生み出す** ステップ（ファンアウト）があると、後続のステップも元の少数の要素の単位で処理されます。この問題では、並列度がアーカイブの数で頭打ちになります。
+
+    融合を防ぐ方法:
+
+    - **Reshuffle** を挿入する（最も一般的）
+    - GroupByKey でまとめてから展開する
+    - 中間の PCollection を副入力として渡す
+
+    圧縮ファイルは分割して読めない形式が多く、1ファイルを1ワーカーで読むことになる点も、並列度が上がらない原因になりやすい点です。
+  diagram: |
+    flowchart TD
+      A["パスの一覧<br/>約100件"] --> B["ParDo<br/>アーカイブを展開"]
+      B --> R["Reshuffle<br/>融合を切る"]
+      R --> C["ParDo<br/>重い変換"]
+      C --> D["多数のワーカーで<br/>並列に処理"]
+      B -.->|Reshuffle なし| E["約100の単位でしか<br/>並列化されない"]
+  references:
+    - title: "パイプラインのライフサイクル"
+      url: "https://docs.cloud.google.com/dataflow/docs/pipeline-lifecycle"
+
+- id: ingest-dataflow-024
+  domain: ingest
+  services: [dataflow]
+  type: single
+  question: |
+    ある人材サービス企業のデータ基盤チームは、Dataflow のパイプラインをテンプレートにして、他部門のユーザーがコードに触れずにコンソールから起動できるようにしたいと考えています。パラメータで指定した入力形式（CSV、Avro、Parquet）によって、パイプラインの変換ステップの構成が変わります。また、パイプラインは社内の Python ライブラリと、OS のシステム パッケージに依存しています。管理の手間を抑えるため、テンプレートは1つにまとめたいと考えています。
+
+    どの方法を選ぶべきですか？
+  choices:
+    a: "Flex テンプレートを作成し、コードと依存関係をコンテナ イメージにまとめて Artifact Registry に保存する"
+    b: "クラシック テンプレートを作成し、入力形式を ValueProvider の実行時パラメータとして受け取るようにする"
+    c: "入力形式ごとにクラシック テンプレートを作成し、各部門のユーザーに目的のテンプレートを選んで起動させる"
+    d: "パイプラインのコードを Cloud Storage に置き、各部門のユーザーに Cloud Shell から Python で起動させる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Flex テンプレートは、起動時にパラメータを使ってパイプライン グラフを構築するため、パラメータで構成を変えられます。依存関係はコンテナ イメージに含められます。"
+    b: "クラシック テンプレートは、テンプレートの作成時にパイプライン グラフが確定します。実行時パラメータで値は変えられますが、変換ステップの構成は変えられません。"
+    c: "入力形式ごとに複数のテンプレートを管理することになり、テンプレートを1つにまとめたいという要件に反します。ユーザーも形式に合わせてテンプレートを選び分ける必要があります。"
+    d: "ユーザーが開発環境を用意し、コードに触れて起動することになり、要件に反します。"
+  explanation: |
+    Dataflow テンプレートは、パイプラインを再利用可能な形で保存し、コンソールや gcloud、API から起動できるようにする仕組みです。
+
+    | 項目 | クラシック テンプレート | Flex テンプレート |
+    | --- | --- | --- |
+    | パイプライン グラフの構築 | テンプレートの作成時 | ジョブの起動時 |
+    | パラメータで構成を変える | できない（値だけ） | できる |
+    | 実行時パラメータの書き方 | `ValueProvider` が必要 | 通常のパイプライン オプション |
+    | 依存関係の持ち方 | ステージング ファイル | コンテナ イメージ |
+
+    Flex テンプレートは、**コンテナ イメージ**（Artifact Registry）と、それを指す **テンプレート仕様ファイル**（Cloud Storage）で構成されます。新しくテンプレートを作る場合は、Flex テンプレートが推奨されています。
+  references:
+    - title: "Dataflow テンプレート"
+      url: "https://docs.cloud.google.com/dataflow/docs/concepts/dataflow-templates"
+    - title: "Flex テンプレートを構築して実行する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/templates/using-flex-templates"
+
+- id: ingest-dataflow-025
+  domain: ingest
+  services: [dataflow, bigquery]
+  type: single
+  question: |
+    ある決済サービス企業は、決済イベントを Pub/Sub から Dataflow で読み取り、BigQuery に書き込んでいます。現在は BigQueryIO の従来のストリーミング挿入（insertAll API）を使っています。書き込みのコストを下げたうえで、パイプラインの再試行によって同じ行が重複して書き込まれないようにしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "BigQueryIO の書き込み方式を、Storage Write API の exactly-once 方式（STORAGE_WRITE_API）に変更する"
+    b: "BigQueryIO の書き込み方式を、Storage Write API の at-least-once 方式（STORAGE_API_AT_LEAST_ONCE）に変更する"
+    c: "BigQueryIO の書き込み方式をファイル読み込み（FILE_LOADS）に変更し、数秒ごとに読み込みジョブを実行する"
+    d: "従来のストリーミング挿入を続け、重複した行は BigQuery のスケジュールされたクエリで定期的に削除する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Storage Write API は従来のストリーミング挿入より低コストで、exactly-once 方式ではストリームのオフセットを使って、再試行しても行が重複しないように書き込めます。"
+    b: "at-least-once 方式は、さらにレイテンシとコストを抑えられますが、再試行で行が重複する可能性があります。重複させないという要件に反します。"
+    c: "数秒ごとに読み込みジョブを実行すると、テーブルあたりの読み込みジョブの割り当て（クォータ）にすぐ達します。読み込みジョブはストリーミングの頻繁な書き込みには向きません。"
+    d: "従来のストリーミング挿入のコストは下がらず、重複を削除するクエリのコストと運用の手間も増えます。"
+  explanation: |
+    Dataflow から BigQuery への書き込み方式です。
+
+    | 方式 | 特徴 | 主な用途 |
+    | --- | --- | --- |
+    | Storage Write API（exactly-once） | 低コスト、重複なしで書き込める | ストリーミング・バッチの標準的な選択 |
+    | Storage Write API（at-least-once） | さらに低レイテンシ・低コスト、重複の可能性あり | 重複を許容できるストリーミング |
+    | ファイル読み込み（FILE_LOADS） | 読み込みジョブを使う | バッチ |
+    | 従来のストリーミング挿入（insertAll） | 以前からの方式 | 新規では Storage Write API を推奨 |
+
+    ストリーミングで exactly-once 方式を使う場合は、書き込みの頻度（triggering frequency）とストリーム数を指定するか、自動シャーディングを使います。
+  references:
+    - title: "Dataflow から BigQuery に書き込む"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/write-to-bigquery"
+    - title: "BigQuery Storage Write API の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/write-api"
+
+- id: ingest-dataflow-026
+  domain: ingest
+  services: [dataflow, kafka, networking, migration]
+  type: single
+  question: |
+    ある自動車部品メーカーは、工場のオンプレミス データセンターで Apache Kafka を運用しており、製造装置のセンサーデータがトピックに書き込まれています。このデータを Dataflow でリアルタイムに処理して BigQuery に書き込みたいと考えています。オンプレミスと Google Cloud の VPC は Cloud Interconnect で接続されており、セキュリティ方針でデータをインターネット経由で送ることは禁止されています。既存の Kafka のプロデューサーは変更したくありません。
+
+    どうすればよいですか？
+  choices:
+    a: "Cloud Interconnect に接続された VPC のサブネットで、内部 IP アドレスだけのワーカーで Dataflow ジョブを起動し、KafkaIO で読み取る"
+    b: "Kafka のプロデューサーを Pub/Sub にパブリッシュするように変更し、Dataflow のストリーミング ジョブで Pub/Sub から読み取って BigQuery に書き込む"
+    c: "Kafka のブローカーに外部 IP アドレスを付けて公開し、外部 IP アドレスを持つ Dataflow のワーカーから KafkaIO でインターネット経由で読み取る"
+    d: "Kafka のトピックのデータを1時間ごとにファイルに書き出して Storage Transfer Service で Cloud Storage に送り、Dataflow のバッチジョブで処理する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataflow は KafkaIO で Kafka のトピックを直接読み取れます。Cloud Interconnect に接続された VPC のサブネットでワーカーを動かせば、インターネットを経由せずにオンプレミスの Kafka にアクセスできます。"
+    b: "既存のプロデューサーを変更しないという要件に反します。"
+    c: "データがインターネットを経由するため、セキュリティ方針に反します。ブローカーを外部に公開すること自体もリスクになります。"
+    d: "1時間ごとのファイル転送では、リアルタイムに処理するという要件を満たせません。"
+  explanation: |
+    Dataflow から Kafka を読む場合は、Beam の **KafkaIO** を使います（Python からは、Java の KafkaIO を言語間変換で呼び出す `ReadFromKafka` を使います）。Dataflow のドキュメントでは、多くの場合に Kafka 用の **Managed I/O** コネクタを使うことが推奨されています。Google が提供する Kafka to BigQuery のテンプレートを使う方法もあります。
+
+    オンプレミスの Kafka に接続するときの要点:
+
+    - Cloud VPN または Cloud Interconnect でつながった VPC のサブネットを `--subnetwork` で指定し、ワーカーを内部 IP アドレスだけで起動する
+    - オンプレミス側のファイアウォールで、ワーカーのサブネットの IP アドレス範囲からブローカーへの接続を許可する
+    - Kafka のクライアントは、ブローカーが通知するアドレス（`advertised.listeners`）に接続し直すため、そのアドレスがワーカーから名前解決でき、到達できる必要がある
+
+    Kafka を Google Cloud に移す場合は、Google Cloud Managed Service for Apache Kafka も選択肢になります。
+  diagram: |
+    flowchart TD
+      subgraph O["オンプレミス"]
+        P["製造装置"] --> K["Apache Kafka"]
+      end
+      K --> I["Cloud Interconnect"]
+      subgraph G["Google Cloud の VPC"]
+        D["Dataflow<br/>内部 IP のみ<br/>KafkaIO"]
+      end
+      I --> D
+      D --> B["BigQuery"]
+  references:
+    - title: "Apache Kafka から Dataflow に読み取る"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/read-from-kafka"
+    - title: "ネットワークとサブネットワークを指定する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/specifying-networks"
+
+- id: ingest-dataflow-027
+  domain: ingest
+  services: [dataflow, cloud-sql, datastream]
+  type: single
+  question: |
+    ある不動産会社は、毎晩 Cloud SQL for PostgreSQL の物件テーブル（約5億行）を全件読み出し、Dataflow のバッチ パイプラインで加工してから BigQuery に書き込んでいます。読み出しには JdbcIO.read で1つのクエリを使っており、読み取りが1つのワーカーで行われるため、ジョブ全体に時間がかかっています。既存の Dataflow の加工処理は残したまま、データベースへの負荷を調整しつつ、読み取りを並列化したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "JdbcIO.readWithPartitions で数値や日時の列を分割の基準に指定し、範囲ごとのクエリを並列に実行する"
+    b: "JdbcIO.read の後に Reshuffle を挿入して、読み取った行を複数のワーカーに分散させてから加工する"
+    c: "最大ワーカー数を引き上げて、水平オートスケーリングで読み取りを担当するワーカーを増やせるようにする"
+    d: "Datastream で Cloud SQL の変更データを BigQuery にレプリケーションし、加工は BigQuery の SQL で行う"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。readWithPartitions は、指定した列の値の範囲でテーブルを分割し、パーティションごとのクエリを複数のワーカーで並列に実行します。パーティション数で、データベースへの同時接続数と負荷も調整できます。"
+    b: "Reshuffle で分散されるのは読み取った後の行です。1つのクエリで読み出す部分は1つのワーカーで行われたままなので、読み取りは速くなりません。"
+    c: "1つのクエリの読み取りは1つのワーカーで行われるため、ワーカーを増やしても読み取りは並列化されません。"
+    d: "既存の Dataflow の加工処理を残すという要件に反します。全件の夜間処理を、変更データのレプリケーションに作り直すことにもなります。"
+  explanation: |
+    **JdbcIO** は、JDBC ドライバのあるリレーショナル データベース（Cloud SQL、AlloyDB、オンプレミスの DB など）を読み書きする Beam のコネクタです。
+
+    | 読み取り方法 | 動作 |
+    | --- | --- |
+    | `JdbcIO.read` | 1つのクエリを1つのワーカーで実行する（読み取った行は後で再分配される） |
+    | `JdbcIO.readWithPartitions` | 分割の基準の列（数値や日時）の範囲で複数のクエリに分け、並列に読み取る |
+
+    設計のポイント:
+
+    - 分割の基準には、値が偏らずに分布し、インデックスのある列を選ぶ
+    - パーティション数を増やすほど並列度は上がるが、データベースへの同時接続と負荷も増える
+    - Cloud SQL にはプライベート IP で接続し、認証情報は Secret Manager で管理する
+
+    コードを書かずに済ませたい場合は、Google が提供する JDBC to BigQuery のテンプレートも使えます。継続的な変更データの取り込みが目的なら、Datastream を検討します。
+  references:
+    - title: "JDBC to BigQuery テンプレート"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/templates/provided/jdbc-to-bigquery"
+    - title: "Dataflow の概要"
+      url: "https://docs.cloud.google.com/dataflow/docs/overview"
+
+- id: ingest-dataflow-028
+  domain: ingest
+  services: [dataflow, vertex-ai, bigquery-ml, pubsub]
+  type: single
+  question: |
+    あるホテル予約サイトは、宿泊者のレビューを Pub/Sub から Dataflow のストリーミング パイプラインで受け取り、感情分析の結果を付けて BigQuery に書き込みたいと考えています。モデルは社内で学習した PyTorch のモデルで、Cloud Storage に保存されています。推論用のエンドポイントを別に運用する手間を避け、レビューごとのネットワーク呼び出しによるレイテンシも抑えたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Apache Beam の RunInference 変換で、PyTorch 用のモデル ハンドラを使ってワーカー上で推論する"
+    b: "モデルを Vertex AI のエンドポイントにデプロイし、ParDo の中でレビューごとにオンライン予測を呼び出す"
+    c: "ParDo の処理メソッドの中で、レビューごとに Cloud Storage からモデルを読み込んでから推論する"
+    d: "レビューをいったん BigQuery に書き込み、モデルを BigQuery ML にインポートして定期的に推論する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。RunInference は、モデルをワーカーに読み込んで複数のスレッドで共有し、要素をまとめて（バッチで）推論します。エンドポイントを運用せずに、パイプラインの中で低レイテンシに推論できます。"
+    b: "エンドポイントの運用が必要になり、レビューごとにネットワーク呼び出しが発生します。要件に反します。"
+    c: "要素ごとにモデルを読み込むため、非常に遅くなります。モデルはワーカーの起動時などに一度だけ読み込むべきです。"
+    d: "BigQuery ML は PyTorch のモデルをそのままではインポートできず、ONNX などへの変換が必要です。定期的な推論では、リアルタイムに結果を付けることもできません。"
+  explanation: |
+    **RunInference** は、Apache Beam のパイプラインの中で ML モデルの推論を行う変換です。ストリーミングのデータを推論結果で拡充する処理に向いています。
+
+    - モデルの種類ごとに **モデル ハンドラ** を使う（scikit-learn、PyTorch、TensorFlow、ONNX、Hugging Face、Vertex AI のエンドポイントなど）
+    - モデルはワーカーで一度だけ読み込まれ、スレッド間で共有される
+    - 要素は自動でまとめて推論されるため、GPU などを効率よく使える
+    - 副入力を使って、パイプラインを止めずにモデルを新しいものに差し替えられる
+
+    大規模なモデルを複数のシステムで共有したい場合は、Vertex AI のエンドポイントにデプロイし、RunInference の Vertex AI 用のモデル ハンドラから呼び出す構成もとれます。
+  diagram: |
+    flowchart TD
+      P["Pub/Sub<br/>レビュー"] --> A["ParDo<br/>前処理"]
+      A --> R["RunInference<br/>PyTorch モデル ハンドラ"]
+      M["Cloud Storage<br/>学習済みモデル"] -.->|ワーカーで読み込み| R
+      R --> B["BigQuery<br/>レビューと感情分析の結果"]
+  references:
+    - title: "Dataflow ML について"
+      url: "https://docs.cloud.google.com/dataflow/docs/machine-learning/ml-about"
+    - title: "RunInference 変換のベスト プラクティス"
+      url: "https://docs.cloud.google.com/dataflow/docs/machine-learning/runinference-best-practices"

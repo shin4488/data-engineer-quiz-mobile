@@ -1,0 +1,765 @@
+- id: analyze-ml-001
+  domain: analyze
+  services: [bigquery-ml, dataflow]
+  type: single
+  question: |
+    ある旅行予約サイトは、BigQuery ML のロジスティック回帰モデルで、予約がキャンセルされる確率を予測しています。データサイエンティストは学習用のビューの中で、宿泊料金を全体の平均と標準偏差で標準化し、予約日から宿泊日までの日数を区間に分ける前処理を SQL で書きました。一方、予測を実行するアプリケーション チームは同じ前処理を自分たちのクエリで書き直したため、平均値の計算対象が学習時と異なってしまい、予測の精度が評価時より大きく下がりました。
+
+    今後モデルを再学習しても、学習時と予測時に同じ前処理が確実に適用されるようにしたいと考えています。BigQuery の中で完結させ、アプリケーション側の変更を最小限に抑えるには、どうすればよいですか？
+  choices:
+    a: "前処理を CREATE MODEL 文の TRANSFORM 句に移し、予測時は前処理前の列をそのまま ML.PREDICT に渡す"
+    b: "前処理を共通のビューにまとめ、学習時と予測時の両方でそのビューを経由してデータを渡す"
+    c: "学習時の平均と標準偏差を別のテーブルに保存し、アプリケーション チームの予測クエリでそのテーブルを結合して標準化する"
+    d: "Dataflow のパイプラインに前処理を実装し、学習用と予測用のデータを同じパイプラインで変換してから BigQuery に書き込む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。TRANSFORM 句に書いた前処理はモデルの一部として保存され、ML.EVALUATE と ML.PREDICT の実行時に自動で適用されます。標準化に使う平均や標準偏差も、学習時に計算した値が予測時に再利用されます。"
+    b: "ビューの中の平均と標準偏差は、参照するたびにその時点の入力データで計算されます。予測時には予測対象のデータで計算されるため、学習時と値がずれる問題が残ります。"
+    c: "同じ値を使うことはできますが、再学習のたびに統計量のテーブルと予測クエリをそろえて更新する必要があり、手作業による食い違いの原因が残ります。"
+    d: "前処理は統一できますが、Dataflow のパイプラインを新たに開発・運用することになり、BigQuery の中で完結させるという要件に反します。"
+  explanation: |
+    学習時と予測時で前処理が食い違い、予測の精度が下がる問題を **トレーニング・サービング スキュー** と呼びます。BigQuery ML では **TRANSFORM 句** で防ぎます。
+
+    ```sql
+    CREATE OR REPLACE MODEL `travel.cancel_model`
+    TRANSFORM(
+      ML.STANDARD_SCALER(price) OVER () AS price_scaled,
+      ML.QUANTILE_BUCKETIZE(lead_days, 5) OVER () AS lead_bucket,
+      is_canceled
+    )
+    OPTIONS (model_type = 'LOGISTIC_REG', input_label_cols = ['is_canceled'])
+    AS SELECT price, lead_days, is_canceled FROM `travel.bookings`;
+    ```
+
+    - TRANSFORM 句の前処理はモデルと一緒に保存され、ML.EVALUATE と ML.PREDICT で自動的に適用される
+    - ML.STANDARD_SCALER や ML.QUANTILE_BUCKETIZE のように統計量を使う関数は、**学習時に計算した値** が予測時にも使われる
+    - 予測時は、TRANSFORM 句で参照している元の列だけを渡せばよい
+    - モデルをエクスポートすると、TRANSFORM 句も別のモデルとして一緒に出力される
+
+    前処理だけを再利用したい場合は、TRANSFORM 句だけを持つモデル（transform-only モデル）を作成し、ML.TRANSFORM 関数で前処理後のデータを取り出せます。
+  diagram: |
+    flowchart TD
+      A["学習データ"] --> T["TRANSFORM 句<br/>前処理と統計量"]
+      T --> M["BigQuery ML モデル<br/>前処理を内包"]
+      B["予測対象の生データ"] --> P["ML.PREDICT"]
+      M --> P
+      P -->|学習時と同じ前処理| R["予測結果"]
+  references:
+    - title: "Perform feature engineering with the TRANSFORM clause"
+      url: "https://docs.cloud.google.com/bigquery/docs/bigqueryml-transform"
+    - title: "Feature preprocessing overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/preprocess-overview"
+
+- id: analyze-ml-002
+  domain: analyze
+  services: [bigquery-ml]
+  type: single
+  question: |
+    ある物流企業は、BigQuery ML の線形回帰モデルで配送の遅延時間を予測しています。現場の担当者に説明しやすいため、モデルの種類は線形回帰のまま精度を上げたいと考えています。分析の結果、次のことがわかりました。
+
+    - 遅延の傾向は、曜日と時間帯の組み合わせによって大きく異なる（例：月曜の朝だけ特に遅れる）
+    - 配送距離と遅延時間の関係は直線的ではなく、距離の分布は短距離に大きく偏っている
+
+    距離の区間ごとの件数がほぼ等しくなるようにしたうえで、これらの傾向をモデルに反映するには、TRANSFORM 句でどの前処理を行うべきですか？
+  choices:
+    a: "曜日と時間帯を文字列にして ML.FEATURE_CROSS で組み合わせ、配送距離は ML.QUANTILE_BUCKETIZE で区間に分ける"
+    b: "曜日と時間帯を文字列にして ML.FEATURE_CROSS で組み合わせ、配送距離は ML.BUCKETIZE で 10km ごとの等間隔の区間に分ける"
+    c: "曜日と時間帯をそれぞれ ML.ONE_HOT_ENCODER で変換し、配送距離は ML.QUANTILE_BUCKETIZE で区間に分ける"
+    d: "曜日・時間帯・配送距離をすべて数値のまま ML.STANDARD_SCALER で標準化し、尺度をそろえる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ML.FEATURE_CROSS で曜日と時間帯の組み合わせを特徴量にすると、線形モデルでも組み合わせの効果を表せます。ML.QUANTILE_BUCKETIZE は分位数で区切るため、偏った分布でも区間ごとの件数がほぼ等しくなります。"
+    b: "特徴量の組み合わせは適切ですが、等間隔に区切ると、短距離に偏ったデータの大半が少数の区間に集まります。件数がほぼ等しい区間にするという要件を満たしません。"
+    c: "距離の扱いは適切ですが、曜日と時間帯を別々にエンコードすると、それぞれの効果を足し合わせることしかできず、「月曜の朝」のような組み合わせの効果を表せません。"
+    d: "標準化は値の尺度をそろえるだけです。線形モデルのままでは、組み合わせの効果も、距離と遅延の直線的でない関係も表せません。"
+  explanation: |
+    線形モデルは各特徴量の効果を足し合わせるだけなので、**組み合わせの効果** や **直線的でない関係** は前処理で表現します。
+
+    | 関数 | 処理 | 使いどころ |
+    | --- | --- | --- |
+    | ML.FEATURE_CROSS | カテゴリ特徴量の組み合わせを新しい特徴量にする | 曜日×時間帯など、組み合わせで効果が変わる場合 |
+    | ML.BUCKETIZE | 指定した境界値で区間に分ける | 業務上の区切り（年齢層など）が決まっている場合 |
+    | ML.QUANTILE_BUCKETIZE | 分位数で、件数がほぼ等しい区間に分ける | 分布が偏った数値を区間に分ける場合 |
+    | ML.STANDARD_SCALER | 平均0、標準偏差1に標準化する | 尺度の異なる数値をそろえる場合 |
+    | ML.ONE_HOT_ENCODER | カテゴリを0/1の列に展開する | カテゴリ変数を数値として扱う場合 |
+
+    - ML.FEATURE_CROSS には、カテゴリ特徴量を STRUCT にまとめて渡す（例：`ML.FEATURE_CROSS(STRUCT(day_of_week, hour_slot))`）
+    - ML.QUANTILE_BUCKETIZE や ML.STANDARD_SCALER は分析関数で、`OVER ()` を付けて使う
+    - TRANSFORM 句の中で使えば、学習時に求めた区切りや統計量が予測時にも自動で適用される
+    - TRANSFORM 句を使わなくても、線形モデルでは STRING 型の特徴量が自動の前処理で one-hot エンコードされる
+  references:
+    - title: "Manual feature preprocessing"
+      url: "https://docs.cloud.google.com/bigquery/docs/manual-preprocessing"
+    - title: "The ML.FEATURE_CROSS function"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-feature-cross"
+    - title: "The ML.QUANTILE_BUCKETIZE function"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-quantile-bucketize"
+
+- id: analyze-ml-003
+  domain: analyze
+  services: [bigquery-ml]
+  type: multiple
+  question: |
+    ある通信事業者は、毎月1日の時点で、各契約者がその月のうちに解約するかどうかを予測するモデルを BigQuery ML で作成しています。学習データは、過去の各月1日時点の契約者ごとの行に、その月に解約したかどうかのラベルを付けたものです。試作したモデルは評価指標が非常に高かったものの、本番で使うと予測がほとんど当たりませんでした。調査の結果、予測の時点では値がわからない列が特徴量に含まれていることがわかりました。
+
+    特徴量から除外すべき列はどれですか？
+  choices:
+    a: "解約の手続きを受け付けた窓口の担当者 ID"
+    b: "解約時に回答してもらう退会理由アンケートの結果"
+    c: "前月までの3か月間のデータ通信量の平均"
+    d: "契約中の料金プランと、契約開始からの経過月数"
+    e: "前月末までのサポート窓口への問い合わせ件数"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。担当者 ID は解約の手続きをした契約者にしか存在せず、ラベル（解約したかどうか）をほぼそのまま表してしまいます。予測時点では得られないため、データ漏洩（リーケージ）の原因になります。"
+    b: "正解です。退会理由のアンケートは解約時に回答されるもので、予測を行う月初の時点には存在しません。ラベルの結果として生まれる情報なので除外します。"
+    c: "予測時点より前の期間で集計した値なので、月初の時点で計算できます。解約の兆候をとらえる正当な特徴量です。"
+    d: "料金プランと経過月数は、予測時点で確定している情報です。リーケージには当たりません。"
+    e: "前月末までで区切って集計しているため、予測時点で得られる情報です。不満の高まりを表す有効な特徴量になり得ます。"
+  explanation: |
+    **データ漏洩（リーケージ）** は、予測の時点では得られない情報や、ラベルの結果として生まれる情報が学習データに混ざることです。評価指標は不自然に高くなりますが、本番では同じ情報が得られないため、精度が大きく下がります。
+
+    リーケージを防ぐための確認ポイントは次のとおりです。
+
+    - 各特徴量について、予測を行う時点でその値が確定しているかを確かめる
+    - 集計した特徴量は、予測時点より前の期間だけで計算する（例：前月末まで）
+    - 時間とともに変わるデータは、学習用と評価用を時間で分け、学習に評価期間より未来の情報が入らないようにする
+    - 同じ行の重複が、学習用と評価用の両方に入らないようにする
+
+    評価指標が「よすぎる」ときは、ラベルと極端に強く結び付いた特徴量がないかをまず疑うのが定石です。
+  references:
+    - title: "BigQuery ML model evaluation overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/evaluate-overview"
+    - title: "Feature preprocessing overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/preprocess-overview"
+
+- id: analyze-ml-004
+  domain: analyze
+  services: [bigquery-ml]
+  type: single
+  question: |
+    あるインターネット広告企業は、過去1年分の広告配信ログ（約20億行）を使い、BigQuery ML でクリック率を予測するモデルを学習しています。ログには配信日時を表す `event_timestamp` 列があります。これまでは既定の設定で学習用と評価用のデータを分けていましたが、本番での精度はいつも評価時の指標を下回ります。利用者の行動の傾向は時期によって変わるため、本番に近い条件で評価したいと考えています。
+
+    学習に使っていない **最も新しい期間** のデータでモデルを評価するには、CREATE MODEL 文のオプションをどのように設定すべきですか？
+  choices:
+    a: "DATA_SPLIT_METHOD を 'SEQ' にし、DATA_SPLIT_COL に event_timestamp 列を指定する"
+    b: "DATA_SPLIT_METHOD を 'RANDOM' にし、DATA_SPLIT_EVAL_FRACTION の値を大きくして評価用データの件数を増やす"
+    c: "DATA_SPLIT_METHOD を 'CUSTOM' にし、ユーザー ID のハッシュ値で振り分けた BOOL 型の列を DATA_SPLIT_COL に指定する"
+    d: "DATA_SPLIT_METHOD を 'NO_SPLIT' にしてすべての行で学習し、同じテーブルに対して ML.EVALUATE を実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。'SEQ' を指定すると、DATA_SPLIT_COL の値の小さい順に学習用データを取り、残りの値の大きい行が評価用データになります。日時の列を指定すれば最も新しい期間で評価でき、評価用の割合は DATA_SPLIT_EVAL_FRACTION で調整できます。"
+    b: "ランダムに分けると、評価用データに学習用と同じ時期のデータが混ざります。件数を増やしても、最も新しい期間で評価するという要件は満たせません。"
+    c: "ユーザー単位では分けられますが、学習用と評価用の両方に同じ期間のデータが含まれます。時期による傾向の変化を評価に反映できません。"
+    d: "学習に使ったデータで評価すると、指標が実際より楽観的になります。学習に使っていないデータで評価するという要件に反します。"
+  explanation: |
+    BigQuery ML の CREATE MODEL 文では、`DATA_SPLIT_METHOD` で学習用と評価用のデータの分け方を指定します。
+
+    | 値 | 分け方 |
+    | --- | --- |
+    | AUTO_SPLIT（既定） | 行数に応じて自動で分ける（ランダムに分割） |
+    | RANDOM | DATA_SPLIT_EVAL_FRACTION の割合でランダムに分ける |
+    | CUSTOM | DATA_SPLIT_COL に指定した BOOL 型の列の値で分ける |
+    | SEQ | DATA_SPLIT_COL の値の小さい順に学習用を取り、値の大きい残りの行を評価用にする |
+    | NO_SPLIT | 分けずに、すべての行を学習に使う |
+
+    時間とともに傾向が変わるデータをランダムに分けると、「未来のデータも使って学習し、過去を評価する」状態になり、評価が楽観的になります。**日時の列の順に分ける（SEQ）** と、本番と同じく「過去のデータで学習し、未来を予測する」条件で評価できます。
+
+    SEQ で DATA_SPLIT_COL に指定した列は、特徴量からは自動的に除外されます。
+  references:
+    - title: "The CREATE MODEL statement"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create"
+    - title: "The CREATE MODEL statement for generalized linear models"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-glm"
+
+- id: analyze-ml-005
+  domain: analyze
+  services: [bigquery-ml]
+  type: single
+  question: |
+    あるクレジットカード会社は、BigQuery ML のロジスティック回帰モデルで不正利用の取引を判定しようとしています。学習データ（約5億件）のうち、不正利用の取引は0.1%程度しかありません。最初に学習したモデルを ML.EVALUATE で評価したところ、accuracy は0.999でしたが、recall は0.05でした。
+
+    学習データを捨てたり複製したりせずに、少数派である不正利用の取引をモデルが学習しやすくするには、どうすればよいですか？
+  choices:
+    a: "AUTO_CLASS_WEIGHTS オプションを TRUE にして、モデルを再学習する"
+    b: "正常な取引をランダムに抽出して件数を減らし、不正利用の取引と同程度の件数にしてから再学習する"
+    c: "不正利用の取引の行を UNION ALL で何度も複製して件数を増やし、正常な取引と合わせて再学習する"
+    d: "accuracy が0.999と十分に高いため、モデルは変更せず、判定のしきい値も既定の0.5のまま使う"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。AUTO_CLASS_WEIGHTS を TRUE にすると、各クラスの出現頻度に反比例する重みが付き、少数派のクラスの誤りが学習で重く扱われます。データの件数を変えずに不均衡に対処でき、再学習後は recall や precision で効果を確かめます。"
+    b: "アンダーサンプリングも不均衡への対処法の一つですが、大量の正常な取引を捨てることになり、学習データを捨てないという要件に反します。"
+    c: "データを複製しないという要件に反します。また、複製した行が学習用と評価用の両方に入ると、評価指標が実際より高く見えるおそれがあります。"
+    d: "不正利用が0.1%しかないため、すべてを「正常」と予測しても accuracy は0.999程度になります。recall が0.05では不正利用をほとんど見逃しており、実用になりません。"
+  explanation: |
+    **クラスの不均衡** があるデータでは、モデルが多数派のクラスばかりを予測するようになり、accuracy だけが高く見えます。
+
+    - **評価指標**：accuracy ではなく、recall（見逃しの少なさ）、precision（誤検知の少なさ）、f1_score、roc_auc などで評価する
+    - **BigQuery ML での対処**：`AUTO_CLASS_WEIGHTS = TRUE` で、クラスの頻度に反比例する重みを自動で付ける。重みを自分で決めたい場合は `CLASS_WEIGHTS` を使う（AUTO_CLASS_WEIGHTS が TRUE のときは指定できない）
+    - **データ側の対処**：アンダーサンプリングやオーバーサンプリングもあるが、情報の損失や、複製した行による評価の偏りに注意する
+
+    ```sql
+    CREATE OR REPLACE MODEL `fraud.txn_model`
+    OPTIONS (
+      model_type = 'LOGISTIC_REG',
+      input_label_cols = ['is_fraud'],
+      auto_class_weights = TRUE
+    ) AS
+    SELECT * FROM `fraud.training_txn`;
+    ```
+  references:
+    - title: "The CREATE MODEL statement for generalized linear models"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-glm"
+    - title: "BigQuery ML model evaluation overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/evaluate-overview"
+
+- id: analyze-ml-006
+  domain: analyze
+  services: [bigquery-ml]
+  type: single
+  question: |
+    ある医療機関は、健康診断のデータから特定の疾患の可能性が高い受診者を見つけ、精密検査を案内するために、BigQuery ML の二値分類モデルを使っています。ML.EVALUATE の結果は次のとおりでした（判定のしきい値は既定の0.5）。
+
+    - precision：0.82
+    - recall：0.41
+    - roc_auc：0.90
+
+    医師からは「精密検査の案内が多少増えてもよいので、疾患のある人の少なくとも8割に案内したい」と要望されています。モデルを再学習せずにこの要望に応えるには、どうすればよいですか？
+  choices:
+    a: "ML.ROC_CURVE で recall が0.8以上になるしきい値を探し、ML.PREDICT に指定する"
+    b: "ML.PREDICT のしきい値を0.7に上げて、疾患の可能性が高いと判定する基準を厳しくし、判定の確実性を高める"
+    c: "roc_auc が0.90なので、疾患のある人の90%はすでに検出できていると判断し、設定を変えずに運用する"
+    d: "AUTO_CLASS_WEIGHTS を TRUE にしてモデルを作り直し、ML.EVALUATE で recall が改善したかを確認する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ML.ROC_CURVE はしきい値ごとの recall や偽陽性率を返します。しきい値を下げると precision は下がりますが recall は上がります。選んだしきい値は ML.PREDICT の引数で指定できます。"
+    b: "しきい値を上げると陽性と判定される人が減るため、recall はさらに下がります。要望と逆の効果になります。"
+    c: "roc_auc は、すべてのしきい値を通したモデルの識別能力を表す指標で、陽性を検出できる割合（recall）ではありません。現在の recall は0.41です。"
+    d: "モデルの再学習を伴うため、「モデルを再学習せずに」という条件に反します。まずはしきい値の調整で対応できます。"
+  explanation: |
+    二値分類モデルは陽性である **確率** を出力し、**しきい値** を超えたものを陽性と判定します。しきい値を変えると、precision と recall がトレードオフの関係で変わります。
+
+    | 指標 | 意味 | 重視する場面 |
+    | --- | --- | --- |
+    | precision | 陽性と判定したうち、実際に陽性だった割合 | 誤検知のコストが大きい（例：誤ったアカウント停止） |
+    | recall | 実際の陽性のうち、陽性と判定できた割合 | 見逃しのコストが大きい（例：疾患、不正利用） |
+    | f1_score | precision と recall の調和平均 | 両方のバランスを見る場合 |
+    | roc_auc | すべてのしきい値を通した識別能力 | モデル同士を比較する場合 |
+
+    BigQuery ML の関連する関数は次のとおりです。
+
+    - `ML.EVALUATE`：評価指標を返す。二値分類では、評価に使うしきい値を STRUCT で指定できる
+    - `ML.ROC_CURVE`：しきい値ごとの recall、偽陽性率、真陽性・偽陽性などの件数を返す（二値分類のみ）
+    - `ML.CONFUSION_MATRIX`：混同行列を返す
+    - `ML.PREDICT`：二値分類では、予測に使うしきい値を指定できる
+  references:
+    - title: "BigQuery ML model evaluation overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/evaluate-overview"
+    - title: "The ML.EVALUATE function"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-evaluate"
+
+- id: analyze-ml-007
+  domain: analyze
+  services: [bigquery-ml]
+  type: single
+  question: |
+    あるスーパーマーケット チェーンは、全国800店舗・30の商品カテゴリについて、過去3年分の日別の売上を BigQuery に保存しています。店舗とカテゴリの組み合わせごとに、今後30日間の日別の売上を予測したいと考えています。売上は年末年始やゴールデンウィークなど、日本の祝日の影響を強く受けます。
+
+    データサイエンティストの人数が限られているため、特徴量の作成やモデルの管理の手間を最小限に抑えたいと考えています。どの方法を選ぶべきですか？
+  choices:
+    a: "ARIMA_PLUS モデルを1つ作成し、TIME_SERIES_ID_COL に店舗とカテゴリ、HOLIDAY_REGION に 'JP' を指定する"
+    b: "店舗とカテゴリの組み合わせごとに CREATE MODEL 文を実行するスクリプトを書き、24,000個の ARIMA_PLUS モデルを個別に管理する"
+    c: "全店舗の売上を日別に合計して ARIMA_PLUS モデルを1つ作成し、予測値を過去の売上比率で店舗とカテゴリに配分する"
+    d: "日付から曜日、月、祝日フラグ、過去の売上のラグなどの特徴量を作成し、店舗とカテゴリも加えて BOOSTED_TREE_REGRESSOR モデルで予測する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。TIME_SERIES_ID_COL を指定すると、1つの CREATE MODEL 文で、ID の組み合わせごとの時系列モデルがまとめて作られます。HOLIDAY_REGION を指定すれば祝日の効果も自動でモデル化されます。"
+    b: "個別にモデルを作ることもできますが、TIME_SERIES_ID_COL を使えば1つのモデルにまとめられるため、管理の手間が不要に増えます。"
+    c: "合計してから配分すると、店舗やカテゴリごとの傾向や季節性の違いが失われ、組み合わせごとの予測精度が下がります。"
+    d: "予測はできますが、祝日フラグやラグなどの特徴量を自分で作成・管理する必要があり、手間を最小限にするという要件に反します。"
+  explanation: |
+    BigQuery ML で時系列予測を行う場合は、**ARIMA_PLUS** モデルが基本です。トレンド、季節性、祝日の効果、外れ値などを自動で処理します。
+
+    ```sql
+    CREATE OR REPLACE MODEL `retail.sales_forecast`
+    OPTIONS (
+      model_type = 'ARIMA_PLUS',
+      time_series_timestamp_col = 'sales_date',
+      time_series_data_col = 'sales',
+      time_series_id_col = ['store_id', 'category'],
+      holiday_region = 'JP'
+    ) AS
+    SELECT sales_date, store_id, category, sales FROM `retail.daily_sales`;
+
+    SELECT * FROM ML.FORECAST(MODEL `retail.sales_forecast`, STRUCT(30 AS horizon));
+    ```
+
+    - `TIME_SERIES_ID_COL`：複数の時系列を、1つのクエリでまとめて学習・予測する
+    - `HOLIDAY_REGION`：祝日の効果をモデル化する。日別または週別で、1年より長い時系列のときに有効になる
+    - `ML.EXPLAIN_FORECAST`：予測をトレンド、季節性、祝日の効果などの成分に分けて確認できる
+    - 気温や販促などの外部の説明変数も使いたい場合は **ARIMA_PLUS_XREG** を使う
+
+    モデルを学習せずに予測したい場合は、事前学習済みの **TimesFM** モデルを使う `AI.FORECAST` 関数も選択肢になります。
+  references:
+    - title: "The CREATE MODEL statement for ARIMA_PLUS models"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series"
+    - title: "Forecast multiple time series with an ARIMA_PLUS univariate model"
+      url: "https://docs.cloud.google.com/bigquery/docs/arima-multiple-time-series-forecasting-tutorial"
+    - title: "Forecasting overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/forecasting-overview"
+
+- id: analyze-ml-008
+  domain: analyze
+  services: [bigquery-ml]
+  type: multiple
+  question: |
+    ある動画配信サービスは、会員の視聴履歴を BigQuery に保存しています。BigQuery ML で次の2つの分析を行いたいと考えています。
+
+    1. 視聴する時間帯、ジャンルごとの視聴割合、利用端末などの傾向から会員をいくつかのグループに分け、グループごとにマーケティング施策を変える。グループの定義は事前に決まっておらず、ラベル付きのデータもない
+    2. 会員ごとに、まだ視聴していない作品の中からおすすめを提示する。会員による評価（星の数など）は収集しておらず、作品ごとの視聴時間だけが記録されている
+
+    それぞれの分析に適したモデルの選び方はどれですか？
+  choices:
+    a: "分析1では、数値の特徴量を標準化して KMEANS モデルを作成し、ML.PREDICT で各会員が属するクラスタを求める"
+    b: "分析2では、FEEDBACK_TYPE を 'IMPLICIT' にした MATRIX_FACTORIZATION モデルを作成し、視聴時間を評価値の列に指定する"
+    c: "分析1では、LOGISTIC_REG モデルを作成し、会員ごとに予測された確率の高さで会員をグループに分ける"
+    d: "分析2では、作品 ID をラベルにした BOOSTED_TREE_CLASSIFIER モデルを作成し、会員が次に視聴する作品を予測する"
+    e: "分析1では、PCA モデルを作成し、会員ごとに求めた主成分の値をそのままグループとして使う"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。k-means はラベルなしで似た会員をクラスタにまとめる教師なし学習です。ML.PREDICT で各会員の CENTROID_ID（所属するクラスタ）を求められ、新しい会員の割り当てにも使えます。"
+    b: "正解です。行列分解は、会員と作品の組み合わせから好みを学習する推奨（レコメンド）のモデルです。視聴時間のような暗黙的なフィードバックには FEEDBACK_TYPE = 'IMPLICIT' を使い、ML.RECOMMEND でおすすめを求めます。"
+    c: "ロジスティック回帰は、正解のラベルがあるデータで学習する分類モデルです。ラベルがないため学習できません。"
+    d: "作品の数だけクラスがある分類問題になり、会員と作品の関係から好みを学ぶ協調フィルタリングもできません。推奨には行列分解が適しています。"
+    e: "PCA は特徴量の次元を減らす手法で、会員をグループに割り当てる機能はありません。クラスタリングの前処理として使うことはあります。"
+  explanation: |
+    BigQuery ML のモデルは、**ラベルの有無** と **予測したいもの** で選びます。
+
+    | 目的 | モデルの種類 | 主な関数 |
+    | --- | --- | --- |
+    | 数値の予測（売上、時間など） | LINEAR_REG、BOOSTED_TREE_REGRESSOR | ML.PREDICT |
+    | 分類（解約する／しないなど） | LOGISTIC_REG、BOOSTED_TREE_CLASSIFIER | ML.PREDICT |
+    | ラベルなしのグループ分け | KMEANS | ML.PREDICT、ML.DETECT_ANOMALIES |
+    | 推奨（レコメンド） | MATRIX_FACTORIZATION | ML.RECOMMEND |
+    | 時系列予測 | ARIMA_PLUS | ML.FORECAST |
+    | 次元削減 | PCA | ML.PREDICT |
+
+    行列分解の FEEDBACK_TYPE は、使えるデータの種類で決めます。
+
+    - **EXPLICIT** （既定）：星の数など、利用者が明示的に付けた評価を使う
+    - **IMPLICIT**：視聴時間、クリック数、購入回数など、行動から推測できる好みを使う
+
+    k-means では尺度の大きな特徴量が距離の計算を支配しやすいため、特徴量を標準化して学習します（KMEANS モデルには標準化を行う STANDARDIZE_FEATURES オプションがあります）。
+  references:
+    - title: "The CREATE MODEL statement for K-means models"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-kmeans"
+    - title: "The CREATE MODEL statement for matrix factorization models"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-matrix-factorization"
+
+- id: analyze-ml-009
+  domain: analyze
+  services: [bigquery-ml, vertex-ai]
+  type: single
+  question: |
+    ある電子部品メーカーは、検査工程のセンサーデータから不良品を予測するために、BigQuery ML の BOOSTED_TREE_CLASSIFIER モデルを使っています。現在は担当者が学習率や木の深さを手作業で変えながら何度も CREATE MODEL 文を実行し、ML.EVALUATE の結果を表計算ソフトで比較しています。
+
+    既存の SQL をできるだけ活かし、繰り返しや比較の処理を自分で書かずに、ハイパーパラメータの探索と最もよい組み合わせの選択を自動化したいと考えています。どうすればよいですか？
+  choices:
+    a: "CREATE MODEL 文に NUM_TRIALS を加え、学習率や木の深さの探索範囲を HPARAM_RANGE などで指定する"
+    b: "BigQuery のスクリプトで、ハイパーパラメータの組み合わせごとに CREATE MODEL 文を繰り返し実行し、ML.EVALUATE の結果をテーブルに記録して比較する"
+    c: "学習コードを Python で書き直し、Vertex AI のカスタム トレーニング ジョブとして、ハイパーパラメータ チューニングを実行する"
+    d: "既存のモデルに対して ML.TRIAL_INFO を実行し、推奨されるハイパーパラメータの値を確認してから、その値でモデルを再学習する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。NUM_TRIALS を指定するとハイパーパラメータ チューニングが有効になり、指定した探索範囲の中で複数のトライアルが自動で実行されます。最もよいトライアルは ML.PREDICT などで既定で使われ、各トライアルの結果は ML.TRIAL_INFO で確認できます。"
+    b: "自動化はできますが、探索の制御と結果の比較を自分で実装・保守する必要があり、繰り返しや比較の処理を書かないという要件に反します。BigQuery ML の組み込みのチューニングで済む作業です。"
+    c: "学習コードの書き直しとトレーニング ジョブの管理が必要になり、既存の SQL を活かすという要件に反します。"
+    d: "ML.TRIAL_INFO は、チューニングを実行したモデルの各トライアルの情報を返す関数です。チューニングしていないモデルから推奨値を求める機能はありません。"
+  explanation: |
+    BigQuery ML の **ハイパーパラメータ チューニング** は、CREATE MODEL 文のオプションを追加するだけで使えます。
+
+    ```sql
+    CREATE OR REPLACE MODEL `factory.defect_model`
+    OPTIONS (
+      model_type = 'BOOSTED_TREE_CLASSIFIER',
+      input_label_cols = ['is_defect'],
+      num_trials = 30,
+      max_parallel_trials = 3,
+      learn_rate = HPARAM_RANGE(0.01, 0.3),
+      max_tree_depth = HPARAM_CANDIDATES([4, 6, 8, 10])
+    ) AS
+    SELECT * FROM `factory.inspection_features`;
+    ```
+
+    | オプション・関数 | 役割 |
+    | --- | --- |
+    | NUM_TRIALS | 試行するモデルの数。指定するとチューニングが有効になる |
+    | MAX_PARALLEL_TRIALS | 同時に実行するトライアルの数 |
+    | HPARAM_RANGE | 連続値の探索範囲（最小値と最大値） |
+    | HPARAM_CANDIDATES | 探索する候補値の一覧 |
+    | ML.TRIAL_INFO | 各トライアルのハイパーパラメータ、評価結果、状態を返す |
+
+    - トライアルの数は、探索するハイパーパラメータ1つにつき10回以上が目安
+    - ML.TRIAL_INFO の is_optimal 列で、最適なトライアルを確認できる
+    - ML.PREDICT などの関数は、既定で最適なトライアルのモデルを使う。trial_id を指定すれば別のトライアルも使える
+  references:
+    - title: "Hyperparameter tuning overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/hp-tuning-overview"
+    - title: "Improve model performance with hyperparameter tuning"
+      url: "https://docs.cloud.google.com/bigquery/docs/hyperparameter-tuning-tutorial"
+
+- id: analyze-ml-010
+  domain: analyze
+  services: [bigquery-ml, vertex-ai, bigtable]
+  type: single
+  question: |
+    ある保険会社は、自動車保険の見積もり申込に不正の疑いがあるかを判定するモデルを、BigQuery ML のロジスティック回帰で作成しました。Web サイトの見積もり画面で申込内容が入力されたときに、リアルタイムに判定結果を返したいと考えています。また、MLOps チームはすべてのモデルのバージョンを Vertex AI で一元管理しています。
+
+    モデルの移植や独自のサービング基盤の構築を避け、運用の手間を最小限に抑えるには、どうすればよいですか？
+  choices:
+    a: "モデルを Vertex AI Model Registry に登録し、エンドポイントにデプロイしてオンライン予測を行う"
+    b: "モデルを Cloud Storage にエクスポートし、GKE 上に予測用のコンテナを構築して、Web サイトから呼び出す"
+    c: "申込のたびに、Web サイトから BigQuery API でクエリ ジョブを実行し、ML.PREDICT で判定結果を求める"
+    d: "毎晩 ML.PREDICT で既存の顧客全員の判定結果を計算して Bigtable に書き込み、Web サイトから参照する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Model Registry に登録すると、BigQuery ML のモデルを Vertex AI のモデルと一緒にバージョン管理でき、エクスポートや予測用のコンテナの用意をせずにエンドポイントへデプロイしてオンライン予測に使えます。"
+    b: "動作はしますが、モデルのエクスポートに加えて、予測用のコンテナやクラスタの構築・運用が必要です。独自のサービング基盤を避けるという要件に反します。"
+    c: "ML.PREDICT はクエリ ジョブとして実行されるため、リクエストごとに低レイテンシで応答する用途には向きません。Vertex AI でのバージョンの一元管理もできません。"
+    d: "判定は入力された申込内容に基づくため、事前に計算した結果では対応できません。リアルタイムに判定するという要件を満たしません。"
+  explanation: |
+    BigQuery ML のモデルは、**Vertex AI Model Registry** に登録して MLOps の仕組みに組み込めます。登録は、コンソールのほか、CREATE MODEL 文のオプションでも行えます。
+
+    ```sql
+    CREATE OR REPLACE MODEL `insurance.quote_fraud_model`
+    OPTIONS (
+      model_type = 'LOGISTIC_REG',
+      input_label_cols = ['is_fraud'],
+      model_registry = 'VERTEX_AI',
+      vertex_ai_model_id = 'quote_fraud'
+    ) AS
+    SELECT * FROM `insurance.training_quotes`;
+    ```
+
+    - 同じ `VERTEX_AI_MODEL_ID` で別のモデルを登録すると、同じモデルの新しいバージョンになる
+    - 作成済みのモデルも、`ALTER MODEL` で `vertex_ai_model_id` を設定して後から登録できる
+    - Gemini などを呼び出すリモートモデルは登録できない。ARIMA_PLUS など、登録はできてもエンドポイントにはデプロイできないモデルもある
+
+    | 予測の方法 | 向いている用途 |
+    | --- | --- |
+    | ML.PREDICT（BigQuery 内） | 大量のデータに対するバッチ予測 |
+    | Vertex AI のエンドポイント | アプリケーションからの低レイテンシのオンライン予測 |
+
+    なお、Vertex AI は2026年4月に Gemini Enterprise Agent Platform の一部となり、ドキュメントや画面ではこの名称も使われています。
+  diagram: |
+    flowchart TD
+      B["BigQuery ML<br/>CREATE MODEL"] -->|登録| R["Vertex AI<br/>Model Registry"]
+      R -->|デプロイ| E["Vertex AI<br/>エンドポイント"]
+      W["見積もり画面"] -->|申込内容| E
+      E -->|判定結果| W
+      B -.->|バッチ予測| P["ML.PREDICT"]
+  references:
+    - title: "Manage BigQuery ML models in Gemini Enterprise Agent Platform"
+      url: "https://docs.cloud.google.com/bigquery/docs/managing-models-vertex"
+    - title: "BigQuery ML and Model Registry"
+      url: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/model-registry-bqml"
+
+- id: analyze-ml-011
+  domain: analyze
+  services: [vertex-ai, bigquery, memorystore, dataflow]
+  type: single
+  question: |
+    あるフードデリバリー企業は、注文時に配達予定時刻を予測するモデルを Vertex AI のエンドポイントで提供しています。予測には、飲食店ごとの直近7日間の平均調理時間や、配達員ごとの平均移動速度などの特徴量を使います。これらの特徴量は、BigQuery のスケジュールされたクエリで1時間ごとに計算し、BigQuery のテーブルに保存しています。
+
+    注文のたびに、飲食店 ID と配達員 ID をキーにして最新の特徴量を数十ミリ秒以内で取得したいと考えています。モデルの学習にも同じ BigQuery のテーブルを使い続け、特徴量を別のデータベースに書き出す独自のパイプラインは作りたくありません。どうすればよいですか？
+  choices:
+    a: "Vertex AI Feature Store で BigQuery のテーブルをデータソースにした特徴ビューを作成し、オンライン ストアから ID で特徴量を取得する"
+    b: "注文のたびに、アプリケーションから BigQuery に対して飲食店 ID と配達員 ID で絞り込むクエリを実行し、特徴量を取得する"
+    c: "Dataflow のバッチ パイプラインで1時間ごとに特徴量を Memorystore for Redis に書き出し、注文時に ID で取得する"
+    d: "特徴量のテーブルを BI Engine の予約の対象に指定し、アプリケーションから ID で絞り込むクエリを高速化する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Vertex AI Feature Store は、BigQuery のテーブルやビューをデータソースとして特徴ビューのデータをオンライン ストアに同期し、エンティティ ID をキーに低レイテンシで特徴量を返します。学習には同じ BigQuery のテーブルをそのまま使えます。"
+    b: "BigQuery は大量のデータの分析に向いたサービスで、注文ごとに数十ミリ秒で応答する用途には向きません。"
+    c: "低レイテンシで取得できますが、書き出し用のパイプラインを独自に開発・運用する必要があり、要件に反します。"
+    d: "BI Engine はダッシュボードなどの分析クエリを高速化する機能で、ID を指定して少数の行を低レイテンシで返すオンライン サービングの仕組みではありません。"
+  explanation: |
+    現在の **Vertex AI Feature Store** は、特徴量のデータを **BigQuery に置いたまま** 管理し、オンライン サービングを担います。
+
+    | 構成要素 | 役割 |
+    | --- | --- |
+    | データソース（BigQuery のテーブル・ビュー） | 特徴量の元データ。学習でもそのまま使う |
+    | 特徴ビュー（FeatureView） | オンラインで提供する特徴量のまとまり。エンティティ ID の列を指定する |
+    | オンライン ストア | 特徴ビューのデータを同期し、低レイテンシで返す |
+
+    - オンライン サービングの種類は、大量のデータに対応する **Bigtable オンライン サービング** を選ぶ。もう一方の Optimized オンライン サービングは非推奨になっている
+    - 同期はスケジュールに沿って実行するほか、Bigtable オンライン サービングでは継続的な同期も選べる（特徴グループの登録が必要）
+    - 学習データと推論時の特徴量を同じソースから作るため、トレーニング・サービング スキューを抑えやすい
+
+    なお、Vertex AI は2026年4月に Gemini Enterprise Agent Platform の一部となりました。
+  diagram: |
+    flowchart TD
+      S["スケジュールされたクエリ<br/>1時間ごと"] --> T["BigQuery<br/>特徴量テーブル"]
+      T -->|学習データ| M["モデルの学習"]
+      T -->|定期的に同期| F["Feature Store<br/>オンライン ストア"]
+      A["注文アプリ"] -->|ID で取得| F
+      A -->|特徴量を付けて予測| E["Vertex AI<br/>エンドポイント"]
+  references:
+    - title: "About Feature Store on Gemini Enterprise Agent Platform"
+      url: "https://docs.cloud.google.com/vertex-ai/docs/featurestore/latest/overview"
+    - title: "Online serving types"
+      url: "https://docs.cloud.google.com/vertex-ai/docs/featurestore/latest/online-serving-types"
+
+- id: analyze-ml-012
+  domain: analyze
+  services: [vertex-ai, bigquery-ml, dataproc]
+  type: single
+  question: |
+    ある電力会社は、発電設備の振動センサーのデータ（約2TB）を BigQuery に蓄積しています。研究チームは、故障の予兆を検出するために、独自の損失関数を持つ PyTorch のモデルをすでに開発しており、このコードをそのまま使って GPU で学習したいと考えています。学習済みのモデルはバージョンを管理し、後から推論にも使います。
+
+    どの方法を選ぶべきですか？
+  choices:
+    a: "Vertex AI のカスタム トレーニングで既存の PyTorch のコードを GPU で実行し、BigQuery のデータを読み込んで学習する"
+    b: "BigQuery ML の DNN_REGRESSOR モデルで同じ構成のネットワークを定義し、CREATE MODEL 文で学習する"
+    c: "PyTorch のモデルを ONNX 形式に変換して BigQuery ML にインポートし、BigQuery のデータで学習させる"
+    d: "Dataproc クラスタを作成し、Spark MLlib で同じモデルを実装し直して、BigQuery のデータで学習する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。カスタム トレーニングでは、既存の PyTorch のコードをコンテナで実行し、GPU を使って学習できます。BigQuery のデータは学習コードから直接読み込め、学習済みモデルは Vertex AI Model Registry でバージョン管理できます。"
+    b: "BigQuery ML の DNN モデルでは、独自の損失関数や任意のネットワーク構成は定義できません。既存のコードも使えません。"
+    c: "ONNX などのモデルのインポートは、学習済みのモデルを BigQuery の中で推論に使うための機能です。インポートしたモデルを BigQuery で学習させることはできません。"
+    d: "Spark MLlib でモデルを作り直す必要があり、既存の PyTorch のコードをそのまま使うという要件に反します。"
+  explanation: |
+    BigQuery のデータで機械学習を行うときは、**SQL で済むかどうか** で BigQuery ML と Vertex AI を使い分けます。
+
+    | 観点 | BigQuery ML | Vertex AI のカスタム トレーニング |
+    | --- | --- | --- |
+    | 開発の方法 | SQL（CREATE MODEL 文） | Python などの任意のコード（PyTorch、TensorFlow など） |
+    | モデル | 組み込みのモデル（線形回帰、ブーストツリー、DNN など） | 任意の構成、独自の損失関数 |
+    | 計算資源 | BigQuery のスロット | GPU や TPU を選べる |
+    | 向いている場面 | データを移動せずに素早くモデルを作る | 既存のコードや高度なモデルを使う |
+
+    - Vertex AI の学習コードからは、BigQuery のデータを直接読み込める
+    - 学習済みモデルは Vertex AI Model Registry でバージョン管理し、エンドポイントにデプロイしたり、BigQuery ML からリモートモデルとして呼び出したりできる
+    - ONNX、TensorFlow、XGBoost などの学習済みモデルは、BigQuery ML にインポートして BigQuery の中で推論に使える
+
+    なお、Vertex AI は2026年4月に Gemini Enterprise Agent Platform の一部となりました。
+  references:
+    - title: "Introduction to ML in BigQuery"
+      url: "https://docs.cloud.google.com/bigquery/docs/bqml-introduction"
+    - title: "Introduction to Model Registry"
+      url: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/introduction"
+
+- id: analyze-ml-013
+  domain: analyze
+  services: [dataplex, bigquery]
+  type: single
+  question: |
+    ある不動産ポータルサイトの運営企業は、物件、問い合わせ、閲覧ログなど約300のテーブルを BigQuery に保存しています。データサイエンティストは、機械学習の特徴量を選ぶ前に、各列の NULL の割合、値の種類の多さ、よく出現する値、数値の分布などを把握したいと考えています。この情報は週に1回更新して BigQuery のコンソールで確認できるようにするとともに、時間による変化を追えるよう BigQuery のテーブルにも蓄積したいと考えています。
+
+    独自のコードを最小限に抑えて実現するには、どうすればよいですか？
+  choices:
+    a: "Dataplex のデータ プロファイル スキャンを週1回のスケジュールで設定し、結果を公開するとともに BigQuery のテーブルにエクスポートする"
+    b: "Dataplex のデータ品質スキャンを作成し、各列に NULL チェックや一意性チェックのルールを定義して週1回実行する"
+    c: "列ごとに COUNTIF や APPROX_COUNT_DISTINCT で統計量を求める SQL を作成し、スケジュールされたクエリで週1回実行する"
+    d: "Gemini in BigQuery のデータ インサイトで各テーブルの分析情報を生成し、提案されたクエリを週1回実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。データ プロファイル スキャンは、NULL の割合、一意な値の割合、上位の値、数値の統計量などを自動で求めます。スケジュールで実行でき、結果は BigQuery のコンソールに公開できるほか、BigQuery のテーブルにエクスポートして履歴を蓄積できます。"
+    b: "データ品質スキャンは、定義したルールを満たすかどうかを判定する機能です。分布をそのまま把握する目的には合わず、ルールの定義も必要になります。"
+    c: "300のテーブルのすべての列について SQL を作成・保守する必要があり、独自のコードを最小限にするという要件に反します。"
+    d: "データ インサイトは、テーブルについての質問例と SQL、説明文を生成する機能です。列ごとの統計量を定期的に求めて蓄積する仕組みではありません。"
+  explanation: |
+    **データ プロファイリング** は、データの中身を統計的に把握する機能です。特徴量の選択や前処理の方針を決める前の、探索的な分析に役立ちます。
+
+    | 機能 | 目的 | 結果 |
+    | --- | --- | --- |
+    | データ プロファイル スキャン | データの特徴を知る | NULL の割合、一意な値の割合、上位の値、数値の統計量など |
+    | データ品質スキャン | ルールを満たすかを検証する | ルールごとの合格・不合格 |
+
+    - スキャンはオンデマンドでもスケジュールでも実行でき、サンプリングの割合を指定してコストを抑えられる
+    - 結果は BigQuery と Dataplex のコンソールに公開でき、BigQuery のテーブルにもエクスポートできる
+    - 公開したプロファイルの結果は、Gemini in BigQuery のデータ インサイトが質問や SQL を生成するときの根拠にも使われ、生成される SQL の精度が上がる
+
+    なお、Dataplex Universal Catalog は2026年4月に **Knowledge Catalog** に名称が変わりました（API などの名前は dataplex のままです）。
+  references:
+    - title: "About data profiling"
+      url: "https://docs.cloud.google.com/dataplex/docs/data-profiling-overview"
+    - title: "Create and use data profile scans"
+      url: "https://docs.cloud.google.com/dataplex/docs/use-data-profiling"
+
+- id: analyze-ml-014
+  domain: analyze
+  services: [bigquery, dataplex]
+  type: single
+  question: |
+    ある人材サービス企業のデータアナリストは、求人、応募、面接など多数のデータセットを BigQuery で扱っています。SQL に慣れていないメンバーも多いため、次のような進め方で探索的な分析をしたいと考えています。
+
+    - 自然言語で関連するテーブルを探し、複数のテーブルを結合するクエリを自然言語の指示から作成する
+    - クエリの結果をグラフで可視化し、要約も確認する
+    - こうした分析の手順を視覚的なワークフローとして残し、チームで共有する
+
+    どの機能を使うべきですか？
+  choices:
+    a: "BigQuery のデータ キャンバス"
+    b: "BigQuery のデータ インサイト"
+    c: "クエリエディタでの Gemini による SQL のコード補完"
+    d: "Dataplex のデータ プロファイル スキャン"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。データ キャンバスでは、自然言語でのテーブルの検索、SQL の生成、クエリの実行、グラフの作成、結果の要約を行えます。手順は有向非巡回グラフ（DAG）のノードとして残るため、共有や再利用もしやすくなります。"
+    b: "データ インサイトは、テーブルやデータセットについて質問例と SQL を自動で提案する機能です。可視化を含む分析の手順をワークフローとして組み立てて共有する用途には向きません。"
+    c: "コード補完は、SQL を書いている途中で続きを提案する機能で、SQL を自分で書くことが前提です。テーブルの検索や可視化、手順の共有はできません。"
+    d: "プロファイル スキャンは列ごとの統計量を求める機能で、自然言語でのクエリの作成や可視化は行いません。"
+  explanation: |
+    **Gemini in BigQuery** には、データの探索と分析を支援する機能がいくつかあります。目的に合わせて使い分けます。
+
+    | 機能 | できること |
+    | --- | --- |
+    | データ キャンバス | 自然言語でのテーブル検索、SQL の生成、可視化、要約を、DAG 形式のワークフローで進める |
+    | データ インサイト | テーブルのメタデータやプロファイルをもとに、質問例と SQL、テーブルや列の説明を生成する |
+    | SQL の生成・補完・説明 | クエリエディタで、自然言語からの SQL 生成、入力中の補完、既存の SQL の説明を行う |
+
+    - これらの機能を使うには、プロジェクトで Gemini in BigQuery を有効にし、利用者に必要なロールを付与する
+    - 自然言語から生成した SQL は、意図どおりの結合や条件になっているかを確認してから使う
+    - データ インサイトは、公開済みのデータ プロファイル スキャンの結果があると、より正確なクエリを生成できる
+  references:
+    - title: "Analyze with BigQuery data canvas"
+      url: "https://docs.cloud.google.com/bigquery/docs/data-canvas"
+    - title: "Data insights overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/data-insights"
+    - title: "Gemini in BigQuery overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/gemini-overview"
+
+- id: analyze-ml-015
+  domain: analyze
+  services: [bigquery-ml, vertex-ai, bigquery]
+  type: single
+  question: |
+    あるホテルチェーンは、宿泊客のレビュー（約500万件のテキスト）を BigQuery に保存しています。マーケティング チームは、各レビューから「感情（肯定・否定・中立）」「言及されている設備やサービス」「1文の要約」を取り出し、型の決まった列を持つテーブルとして分析に使いたいと考えています。ラベル付きの学習データはありません。
+
+    データを BigQuery の外に書き出さず、SQL だけで、結果を取り出すためのパース処理も不要にするには、どうすればよいですか？
+  choices:
+    a: "Cloud リソース接続を使って Gemini のリモートモデルを作成し、AI.GENERATE_TABLE 関数で出力スキーマを指定して、結果をテーブルに保存する"
+    b: "Cloud リソース接続を使って Gemini のリモートモデルを作成し、AI.GENERATE_TEXT 関数で JSON 形式の回答を求め、JSON 関数で各項目を取り出す"
+    c: "レビューを Cloud Storage にエクスポートし、Vertex AI のバッチ推論で Gemini に処理させてから、結果を BigQuery に読み込む"
+    d: "一部のレビューに人手で感情のラベルを付け、BigQuery ML の LOGISTIC_REG モデルを学習して残りのレビューを分類する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。AI.GENERATE_TABLE は、指定した出力スキーマの列と型に沿って Gemini の回答を構造化し、表形式で返します。SQL だけで完結し、回答の文字列から値を取り出す処理も不要です。"
+    b: "同じことはできますが、モデルの回答が常に正しい JSON になるとは限らず、パース処理とエラーへの対処が必要です。パース処理を不要にするという要件に反します。"
+    c: "データを BigQuery の外に書き出す必要があり、エクスポートと読み込みの処理も増えます。要件に反します。"
+    d: "ラベル付けの作業が必要なうえ、分類できるのは感情だけです。言及された設備の抽出や要約はできません。"
+  explanation: |
+    BigQuery では、**リモートモデル** を通じて Gemini を SQL から呼び出せます。
+
+    1. **Cloud リソース接続** を作成し、接続のサービス アカウントに Vertex AI ユーザーのロール（`roles/aiplatform.user`）を付与する
+    2. `CREATE MODEL ... REMOTE WITH CONNECTION` で、Gemini を指すリモートモデルを作成する
+    3. 生成 AI の関数で、テーブルの各行を処理する
+
+    | 関数 | 特徴 |
+    | --- | --- |
+    | AI.GENERATE_TEXT（旧来の ML.GENERATE_TEXT） | テーブルの各行のプロンプトに対するテキストを生成する。Gemini 以外のパートナー モデルやオープンモデルにも対応する |
+    | AI.GENERATE_TABLE | 出力スキーマ（列名と型）を指定し、回答を型の決まった列として返す |
+    | AI.GENERATE | 行ごとに呼び出すスカラー関数。出力スキーマも指定できる |
+
+    - ML.GENERATE_TEXT は引き続き使えるが、新しいクエリでは出力列の名前が簡潔な AI.GENERATE_TEXT が推奨されている
+    - 出力スキーマの各フィールドには説明を付けられ、モデルに期待する値を伝えやすくなる
+    - 大量の行を処理する場合は、処理対象の行を先にテーブルへ絞り込んでから関数を呼び出し、モデルへのリクエストの数とコストを抑える
+  references:
+    - title: "Generative AI overview"
+      url: "https://docs.cloud.google.com/bigquery/docs/generative-ai-overview"
+    - title: "The AI.GENERATE_TABLE function"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-generate-table"
+    - title: "Choose a text generation function"
+      url: "https://docs.cloud.google.com/bigquery/docs/choose-text-generation-function"
+
+- id: analyze-ml-016
+  domain: analyze
+  services: [bigquery-ml, bigquery, cloud-storage, vertex-ai]
+  type: single
+  question: |
+    ある新聞社は、過去の報道写真約200万枚を Cloud Storage に保存しており、BigQuery でこれらの画像を参照するオブジェクト テーブルを作成済みです。記者が「雨の中を傘をさして歩く通勤客」のような自由な文章で、内容の近い写真を探せるようにしたいと考えています。写真に手作業でタグを付ける余裕はなく、言い回しが異なっても意味の近い写真を見つけられることが求められています。
+
+    BigQuery の中で実現するには、どうすればよいですか？
+  choices:
+    a: "マルチモーダル エンベディング モデルのリモートモデルで、画像と検索文の両方のエンベディングを生成し、VECTOR_SEARCH で近い画像を探す"
+    b: "Gemini のリモートモデルで各画像の説明文を生成して保存し、検索文に含まれる単語を LIKE 演算子で部分一致検索する"
+    c: "テキスト エンベディング モデルのリモートモデルで、画像のファイル名と URI のエンベディングを生成し、VECTOR_SEARCH で検索文と比較する"
+    d: "画像は画像用のモデル、検索文はテキスト用の別のモデルでそれぞれエンベディングを生成し、VECTOR_SEARCH で距離を比較する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。マルチモーダル エンベディング モデルは、画像とテキストを同じベクトル空間に変換します。オブジェクト テーブルを ML.GENERATE_EMBEDDING に渡して画像のエンベディングを作り、同じモデルで変換した検索文と VECTOR_SEARCH で比較すれば、意味の近い写真を探せます。"
+    b: "説明文の生成はできますが、LIKE による部分一致では、言い回しが異なる検索文に対応できません。意味の近さで探すという要件を満たしません。"
+    c: "ファイル名や URI には写真の内容がほとんど含まれないため、内容の近い写真は探せません。"
+    d: "異なるモデルで作ったエンベディングは別々のベクトル空間にあるため、距離を比較しても意味の近さを表しません。"
+  explanation: |
+    画像やテキストなどの **非構造化データ** を意味の近さで検索するには、エンベディング（ベクトル）を使います。
+
+    1. Cloud Storage の画像を参照する **オブジェクト テーブル** を用意する
+    2. マルチモーダル エンベディング モデルを指すリモートモデルを作成する
+    3. `ML.GENERATE_EMBEDDING` にオブジェクト テーブルを渡し、画像のエンベディングをテーブルに保存する
+    4. 検索文を同じモデルでエンベディングにし、`VECTOR_SEARCH` で距離の近い画像を探す
+    5. データ量が多い場合は、エンベディングの列に **ベクトル インデックス** を作成して検索を高速化する
+
+    - マルチモーダル エンベディングは、テキスト・画像・動画を **同じ意味空間** に変換するため、文章で画像を検索できる
+    - VECTOR_SEARCH はインデックスがなくても動作するが、インデックスがあると多くの場合で性能が上がる
+    - ベクトル インデックスの種類には、k-means でベクトルをクラスタに分ける **IVF** と、ScaNN に基づき、多数の検索をまとめて実行するバッチ処理に向いた **TREE_AH** がある
+    - 新しいクエリでは、ML.GENERATE_EMBEDDING と同じ機能で出力列の名前が簡潔になった `AI.GENERATE_EMBEDDING` の利用が推奨されている
+  references:
+    - title: "Generate and search multimodal embeddings"
+      url: "https://docs.cloud.google.com/bigquery/docs/generate-multimodal-embeddings"
+    - title: "Manage vector indexes"
+      url: "https://docs.cloud.google.com/bigquery/docs/vector-index"
+
+- id: analyze-ml-017
+  domain: analyze
+  services: [bigquery-ml, bigquery, vertex-ai]
+  type: multiple
+  question: |
+    ある SaaS 企業は、製品マニュアルや FAQ など約5万件の文書の本文を、BigQuery のテーブル（列は doc_id、updated_at、body）に保存しています。社内のサポート担当者向けに、質問に関連する記述を VECTOR_SEARCH で探して Gemini に回答を生成させる、RAG（検索拡張生成）の仕組みを作っています。現在、次の問題があります。
+
+    - 文書全体を1つのエンベディングにしているため、長い文書では関連する手順の記述をうまく検索できず、エンベディング モデルの入力の上限を超える文書もある
+    - 変更があるのは毎日全体の1%程度の文書だけなのに、毎晩すべての文書のエンベディングを生成し直しており、コストがかかるうえ、割り当て（クォータ）のエラーも起きている
+
+    回答の根拠となる具体的な手順の記述を取り出せるようにしたうえで、これらの問題を解決するには、どの対応を組み合わせるべきですか？
+  choices:
+    a: "文書を前後が少し重なるように適切な長さのチャンクに分割し、doc_id とチャンク番号とともに保存して、チャンクごとにエンベディングを生成する"
+    b: "updated_at をもとに追加・変更された文書だけを選び、その文書の古いチャンクを削除して、新しいチャンクのエンベディングだけを生成する"
+    c: "エンベディング モデルの入力の上限を超えないように、各文書の先頭部分だけを切り出してからエンベディングを生成する"
+    d: "Gemini で各文書の短い要約を生成してテーブルに保存し、要約文のエンベディングだけを生成して検索に使う"
+    e: "VECTOR_SEARCH の top_k を大きくして、より多くの文書の全文を検索結果として Gemini のプロンプトに含める"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。チャンクに分割すると、質問に関連する箇所だけを検索で取り出せ、エンベディング モデルの入力の上限にも収まります。チャンクを少し重ねると、区切りの位置で文脈が途切れる影響を減らせます。"
+    b: "正解です。変更のあった文書だけのエンベディングを生成し直す増分処理にすると、生成のコストとモデルへのリクエスト数を大きく減らせ、割り当てのエラーも起きにくくなります。"
+    c: "先頭以外に書かれた手順が検索の対象から外れ、回答の根拠となる記述を取り出せなくなります。"
+    d: "要約では具体的な手順の記述が失われるため、要件を満たしません。すべての文書の要約を生成するコストもかかります。"
+    e: "検索の単位が文書全体のままなので関連する箇所を絞り込めず、プロンプトが長くなって生成のコストも増えます。エンベディングの再生成の問題も解決しません。"
+  explanation: |
+    RAG の検索精度とコストは、**データの準備** で大きく変わります。
+
+    | 準備の作業 | ポイント |
+    | --- | --- |
+    | チャンク分割 | 見出しや段落などの意味のまとまりを目安に分け、前後を少し重ねる。元の文書の ID とチャンク番号を保持する |
+    | エンベディングの生成 | チャンクごとに生成する。質問文も同じモデルでエンベディングにする |
+    | 増分更新 | 追加・変更された文書のチャンクだけを作り直す。削除された文書のチャンクも消す |
+    | 検索 | VECTOR_SEARCH で質問に近いチャンクを探す。データ量が多ければベクトル インデックスで高速化する |
+    | 生成 | 取り出したチャンクをプロンプトに含めて Gemini に回答させる |
+
+    エンベディングの列を自動で最新に保ちたい場合は、2026年に一般提供（GA）となった **autonomous embedding generation** も使えます。`AI.EMBED` 関数を使う生成列を定義すると、ソースの列にデータが追加・変更されるたびに、BigQuery がエンベディングを自動で生成・更新します。
+  diagram: |
+    flowchart TD
+      D["文書テーブル<br/>doc_id, updated_at, body"] -->|追加・変更分だけ| C["チャンク分割"]
+      C --> E["エンベディング生成"]
+      E --> V["チャンクと<br/>エンベディングのテーブル"]
+      Q["サポート担当者の質問"] --> S["VECTOR_SEARCH"]
+      V --> S
+      S -->|関連するチャンク| G["Gemini で回答を生成"]
+  references:
+    - title: "Perform semantic search and retrieval-augmented generation"
+      url: "https://docs.cloud.google.com/bigquery/docs/vector-index-text-search-tutorial"
+    - title: "Autonomous embedding generation"
+      url: "https://docs.cloud.google.com/bigquery/docs/autonomous-embedding-generation"
+    - title: "The ML.GENERATE_EMBEDDING function"
+      url: "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-generate-embedding"

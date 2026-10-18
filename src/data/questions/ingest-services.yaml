@@ -1,0 +1,1255 @@
+- id: ingest-services-001
+  domain: ingest
+  services: [pubsub]
+  type: single
+  question: |
+    ある物流企業は、全国の倉庫から送られる出荷イベントを Pub/Sub で受け取り、GKE 上で動くサブスクライバーが在庫管理システムに反映しています。サブスクライバーは pull 型のサブスクリプションを使っており、Pod の台数は固定です。1件の処理には数百ミリ秒かかります。夜間のバッチ処理の後に数百万件のメッセージが一度に溜まると、Pod が処理しきれない量のメッセージを受け取ってメモリ不足になり、再起動を繰り返します。
+
+    メッセージを失わずに、Pod が処理できる量だけを受け取るようにしたいと考えています。アプリケーションの変更は設定の追加程度に抑えたいです。
+
+    どうすればよいですか？
+  choices:
+    a: "サブスクライバーのクライアント ライブラリでフロー制御を設定し、未処理で保持するメッセージ数とバイト数の上限を決める"
+    b: "サブスクリプションを push 型に変更し、GKE 上のサービスの HTTPS エンドポイントにメッセージを配信させる"
+    c: "サブスクリプションの確認応答期限を短くし、処理しきれないメッセージが早く Pub/Sub に戻るようにする"
+    d: "サブスクリプションのメッセージ保持期間を延ばし、溜まったメッセージが期限切れで失われないようにする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。フロー制御を設定すると、未処理のメッセージ数やバイト数が上限に達した時点でクライアントが受信を止め、処理が進むと再開します。受け取っていないメッセージはサブスクリプションに残るので失われません。"
+    b: "push 型では、配信の速さを Pub/Sub が応答の成否を見ながら調整するため、受け取る量の上限をサブスクライバー側で直接指定できません。エンドポイントの公開や認証の設定も新たに必要になります。"
+    c: "期限を短くすると処理中のメッセージまで再配信され、重複処理が増えます。クライアントが一度に受け取る量は変わらないため、メモリ不足も解決しません。"
+    d: "保持期間はメッセージが残る期間の設定で、クライアントが一度に受け取る量は変わりません。メモリ不足は続きます。"
+  explanation: |
+    サブスクライバーが受け取る量を処理能力に合わせるには、pull 型サブスクリプションの **フロー制御** を使います。
+
+    - クライアント ライブラリに、未処理で保持するメッセージ数とバイト数の上限を設定する
+    - 上限に達すると新しいメッセージの受信を止め、確認応答（ack）か否定応答（nack）を返すと受信を再開する
+    - 受け取っていないメッセージはサブスクリプションに残るため、急増時もメッセージは失われない
+
+    設定項目の名前と既定値は言語ごとに異なります（例：Java の setMaxOutstandingElementCount、Go の MaxOutstandingMessages）。
+
+    | 方式 | 配信を始める側 | 向いている用途 |
+    | --- | --- | --- |
+    | pull | サブスクライバーが要求する | 大量のメッセージの処理、受信量の細かい制御、1回限りの配信 |
+    | push | Pub/Sub が HTTPS エンドポイントに送る | Cloud Run などで、メッセージが届いたときだけ処理する |
+    | エクスポート（BigQuery / Cloud Storage） | Pub/Sub が直接書き込む | 変換せずに保存する |
+  references:
+    - title: "フロー制御で一時的な急増に対処する"
+      url: "https://docs.cloud.google.com/pubsub/docs/flow-control"
+    - title: "サブスクリプション タイプを選択する"
+      url: "https://docs.cloud.google.com/pubsub/docs/subscriber"
+
+- id: ingest-services-002
+  domain: ingest
+  services: [pubsub]
+  type: multiple
+  question: |
+    あるオンライン証券会社は、顧客の注文イベント（発注・訂正・取消）を Pub/Sub に送り、ポジションを計算するサービスで処理しています。同じ口座のイベントが発生順に処理されないと、ポジションを誤って計算してしまいます。口座は数十万あり、異なる口座どうしのイベントの順序は問いません。パブリッシャーはすべて東京リージョンで動いています。
+
+    全体のスループットを落とさずに、口座ごとの処理順序を保証したいと考えています。どの対応を組み合わせるべきですか？
+  choices:
+    a: "パブリッシャーで、口座 ID を順序指定キーとしてメッセージに設定する"
+    b: "サブスクリプションで、メッセージの順序指定を有効にする"
+    c: "サブスクリプションで、1回限りの配信を有効にする"
+    d: "すべてのメッセージに、同じ値の順序指定キーを設定する"
+    e: "口座ごとにトピックとサブスクリプションを作成する"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。順序指定キーが同じメッセージは、発行された順にサブスクライバーへ配信されます。口座 ID をキーにすれば、口座ごとの順序を保ちながら、異なる口座のメッセージは並行して処理できます。"
+    b: "正解です。順序指定はサブスクリプション単位の設定です。有効にしないと、順序指定キーが付いていても配信の順序は保証されません。"
+    c: "1回限りの配信は、確認応答が済んだメッセージを再配信しないための機能です。配信の順序は保証しません。"
+    d: "順序指定キーごとに発行のスループットに上限があるため、全メッセージを1つのキーにすると全体のスループットが大きく下がります。口座をまたいだ順序は不要なので、キーを1つにする理由もありません。"
+    e: "数十万のトピックとサブスクリプションを作成・管理することになり、現実的ではありません。サブスクライバーも膨大な数のサブスクリプションを扱う必要があります。"
+  explanation: |
+    Pub/Sub で関連するメッセージの順序を保つには、**順序指定キー** を使います。
+
+    1. パブリッシャーで、順序を保ちたい単位（この例では口座 ID）を順序指定キーとして設定する。クライアント ライブラリでは、パブリッシャー側でもメッセージの順序指定を有効にする
+    2. サブスクリプションで、メッセージの順序指定を有効にする
+    3. 同じ順序指定キーのメッセージは、同じリージョンから発行する
+
+    覚えておきたい点:
+
+    - 順序が保証されるのは、**同じ順序指定キーのメッセージの間だけ** です。キーが異なるメッセージは並行して配信されます。
+    - 順序指定キーごとに発行のスループット上限（1 MBps）があるため、キーは細かい単位に分散させます。
+    - 順序指定は重複をなくす機能ではありません。重複を避けたい場合は、1回限りの配信やサブスクライバー側の重複排除を組み合わせます。
+  references:
+    - title: "メッセージを順序付けする"
+      url: "https://docs.cloud.google.com/pubsub/docs/ordering"
+
+- id: ingest-services-003
+  domain: ingest
+  services: [pubsub, bigquery]
+  type: single
+  question: |
+    ある決済代行会社は、決済完了イベントを Pub/Sub の pull 型サブスクリプションで受け取り、東京リージョンの GKE で動くサブスクライバーが入金台帳に記録しています。まれに、確認応答（ack）を送ったはずのメッセージが再配信され、台帳に同じ取引が二重に記録されることがあります。
+
+    確認応答が成功したメッセージは再配信されないことを、Pub/Sub 側で保証したいと考えています。サブスクライバーの構成は大きく変えたくありません。
+
+    どうすればよいですか？
+  choices:
+    a: "サブスクリプションで1回限りの配信を有効にし、確認応答の成否を確かめてから記録を確定する"
+    b: "サブスクリプションを push 型に変更し、1回限りの配信を有効にして GKE のエンドポイントに配信させる"
+    c: "BigQuery サブスクリプションに切り替え、台帳のテーブルにメッセージを直接書き込ませる"
+    d: "パブリッシャーで順序指定キーを設定し、サブスクリプションでメッセージの順序指定を有効にする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。1回限りの配信を有効にすると、確認応答が成功したメッセージは再配信されません。確認応答の結果を受け取れるので、成功を確かめてから記録を確定できます。"
+    b: "1回限りの配信を使えるのは pull 型のサブスクリプションだけです。push 型やエクスポート型のサブスクリプションでは有効にできません。"
+    c: "BigQuery サブスクリプションの配信は少なくとも1回で、重複して書き込まれる可能性があります。台帳に記録する処理のロジックも失われます。"
+    d: "順序指定は配信の順番を保つ機能です。再配信による重複は防げません。"
+  explanation: |
+    Pub/Sub の既定の配信は **少なくとも1回（at-least-once）** で、確認応答が届かなかった場合などに同じメッセージが再配信されることがあります。**1回限りの配信（exactly-once delivery）** を有効にすると、次のことが保証されます。
+
+    - 確認応答が成功したメッセージは再配信されない
+    - 確認応答期限が切れる前のメッセージは再配信されない
+
+    使うときの条件と注意点:
+
+    | 項目 | 内容 |
+    | --- | --- |
+    | サブスクリプションの種類 | pull 型のみ（StreamingPull を含む） |
+    | 範囲 | 1つのリージョン内。サブスクライバーが複数のリージョンから接続すると重複が起こりうる |
+    | 確認応答 | 成否が返るので、失敗した場合は再処理に備える |
+    | 対象外の重複 | パブリッシャーが同じ内容を2回発行すると別のメッセージ ID になるため、重複は除かれない |
+
+    発行側の重複も避けたい場合は、取引 ID などをキーにして、サブスクライバー側でも重複を排除します。
+  references:
+    - title: "1 回限りの配信"
+      url: "https://docs.cloud.google.com/pubsub/docs/exactly-once-delivery"
+
+- id: ingest-services-004
+  domain: ingest
+  services: [pubsub, iam]
+  type: single
+  question: |
+    ある医療機関は、診察予約のリマインドを送るために、Pub/Sub の push 型サブスクリプションで Cloud Run のサービスにメッセージを配信しています。電話番号が不正なメッセージは Cloud Run が毎回エラーを返すため、何度も再配信され続けています。そこでサブスクリプションにデッドレター トピックを設定し、最大配信試行回数を5回にしました。しかし、エラーが続くメッセージはデッドレター トピックに転送されず、コンソールには権限が不足しているという警告が表示されています。
+
+    何をすべきですか？
+  choices:
+    a: "Pub/Sub のサービス エージェントに、デッドレター トピックのパブリッシャー ロールと元のサブスクリプションのサブスクライバー ロールを付与する"
+    b: "Cloud Run サービスのサービス アカウントに、デッドレター トピックのパブリッシャー ロールと元のサブスクリプションのサブスクライバー ロールを付与する"
+    c: "最大配信試行回数を上限の100回に増やし、デッドレター トピックに転送されるまでの時間に余裕を持たせる"
+    d: "サブスクリプションの再試行ポリシーを指数バックオフに変更し、エラーが続くメッセージを再配信する間隔を広げる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。デッドレター トピックへの転送は Pub/Sub のサービス エージェントが行います。転送先のトピックへの発行と、元のサブスクリプションでの確認応答のために、この2つのロールが必要です。"
+    b: "転送を行うのは Cloud Run ではなく Pub/Sub です。Cloud Run のサービス アカウントに権限を付けても、転送は行われません。"
+    c: "試行回数を増やしても権限の不足は解消せず、転送は行われません。不正なメッセージが再配信される回数が増えるだけです。"
+    d: "再配信の間隔が広がるだけで、メッセージはデッドレター トピックに転送されません。権限の不足も残ります。"
+  explanation: |
+    デッドレター トピックは、処理に失敗し続けるメッセージを別のトピックに分けて、正常なメッセージの処理を妨げないようにする仕組みです。転送は **Pub/Sub のサービス エージェント**（`service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com`）が行うため、次の権限が必要です。
+
+    | 対象 | 付与するロール | 理由 |
+    | --- | --- | --- |
+    | デッドレター トピック | Pub/Sub パブリッシャー | 転送先に発行する |
+    | 元のサブスクリプション | Pub/Sub サブスクライバー | 転送したメッセージを確認応答する |
+
+    設定のポイント:
+
+    - 最大配信試行回数は 5〜100 回（既定は5回）。回数は目安で、多少前後することがある
+    - デッドレター トピックには、元のトピックとは別のトピックを指定する
+    - デッドレター トピックにもサブスクリプションを作成しておく。サブスクリプションがないと、転送されたメッセージを後から読み出せない
+    - 再試行ポリシー（指数バックオフ）と組み合わせると、一時的な障害のときに再配信が集中するのを防げる
+
+    デッドレター トピックへの転送は、サブスクライバーが確認応答しなかった（push 型ではエラーを返した）回数をもとに行われます。そのため、この問題の Cloud Run のように、処理の成否に応じて確認応答するサブスクライバーで効果を発揮します。Dataflow で Pub/Sub を読む場合は、Dataflow がメッセージを取り込んで永続化した時点で確認応答するため、パイプライン内の処理の失敗ではデッドレター トピックに転送されません。Dataflow では、失敗した要素をデッドレター出力に振り分ける処理をパイプラインに実装します。
+  references:
+    - title: "デッドレター トピック"
+      url: "https://docs.cloud.google.com/pubsub/docs/dead-letter-topics"
+    - title: "push サブスクリプション"
+      url: "https://docs.cloud.google.com/pubsub/docs/push"
+
+- id: ingest-services-005
+  domain: ingest
+  services: [pubsub, cloud-storage]
+  type: single
+  question: |
+    ある動画配信サービスは、視聴イベントを Pub/Sub のトピックに送り、課金チームのサブスクリプションで処理しています。今後、レコメンドや不正検知などのチームが順次参加する予定です。新しいチームはそれぞれ自分のサブスクリプションを作成し、作成した時点より前の、直近7日分のイベントから処理を始めたいと考えています。課金チームの処理には影響を与えないようにする必要があります。
+
+    どうすればよいですか？
+  choices:
+    a: "トピックのメッセージ保持期間を7日以上に設定しておき、新しいサブスクリプションの作成後に7日前の時刻を指定してシークする"
+    b: "課金チームのサブスクリプションで確認応答済みメッセージの保持を有効にし、新しいチームにもそのサブスクリプションから受信させる"
+    c: "課金チームのサブスクリプションのスナップショットを毎日作成し、新しいサブスクリプションをそのスナップショットにシークする"
+    d: "Cloud Storage サブスクリプションで全イベントをファイルに保存し、新しいチームには過去分をファイルから読み込ませる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。トピックでメッセージを保持しておくと、後から作成したサブスクリプションでも、保持期間内の時刻にシークして過去のメッセージから受信できます。既存のサブスクリプションには影響しません。"
+    b: "1つのサブスクリプションを複数のチームで共有すると、メッセージがチーム間で分けて配信され、課金チームに届かないメッセージが出ます。課金チームの処理に影響します。"
+    c: "スナップショットに含まれるのは、作成時点で確認応答されていないメッセージと、それ以降のメッセージです。課金チームが確認応答済みの過去のイベントは含まれず、毎日の作成にも手間がかかります。"
+    d: "過去分と新しいイベントで読み込み方が変わり、新しいチームの実装が複雑になります。自分のサブスクリプションで過去分から処理を始めたいという要件にも合いません。"
+  explanation: |
+    Pub/Sub のメッセージ保持には、サブスクリプション単位とトピック単位があります。
+
+    | 機能 | 保持されるメッセージ | 主な用途 |
+    | --- | --- | --- |
+    | サブスクリプションの保持 | そのサブスクリプションで確認応答されていないメッセージ（確認応答済みも保持する設定が可能） | そのサブスクリプションでの再処理 |
+    | トピックの保持（最大31日） | トピックに発行されたすべてのメッセージ | 後から作成したサブスクリプションへの過去分の配信 |
+    | スナップショット | 作成時点で確認応答されていないメッセージと、それ以降のメッセージ | デプロイ前の状態を保存し、問題があれば戻す |
+
+    トピックの保持を有効にすると、どのサブスクリプションも保持期間内の任意の時刻にシークでき、**サブスクリプションの作成前に発行されたメッセージ** も受信できます。保持したメッセージのストレージ料金は、トピックがあるプロジェクトに課金されます。
+  diagram: |
+    flowchart TD
+      P["視聴イベント"] --> T["トピック<br/>メッセージを7日以上保持"]
+      T --> S1["課金チームの<br/>サブスクリプション"]
+      T --> S2["新しいチームの<br/>サブスクリプション"]
+      S2 -.->|7日前の時刻にシーク| T
+  references:
+    - title: "シークでメッセージを再生・削除する"
+      url: "https://docs.cloud.google.com/pubsub/docs/replay-overview"
+    - title: "サブスクリプションの概要"
+      url: "https://docs.cloud.google.com/pubsub/docs/subscription-overview"
+
+- id: ingest-services-006
+  domain: ingest
+  services: [pubsub, bigquery, dataflow]
+  type: multiple
+  question: |
+    ある製造業の企業は、工場の設備センサーのデータを、複数のベンダーのゲートウェイから Pub/Sub のトピックに JSON 形式で送っています。一部のゲートウェイが、項目の欠けたメッセージや型の誤ったメッセージを送るため、後続の処理で失敗が起きています。
+
+    形式に合わないメッセージは発行の時点で拒否し、正しいメッセージは項目ごとに BigQuery テーブルの列として書き込みたいと考えています。メッセージの変換は不要で、運用するパイプラインは増やしたくありません。
+
+    どの対応を組み合わせるべきですか？
+  choices:
+    a: "Avro 形式のスキーマを作成してトピックに関連付け、メッセージのエンコードに JSON を指定する"
+    b: "BigQuery サブスクリプションを作成し、トピックのスキーマを使用して列に書き込むよう設定する"
+    c: "Cloud Run のサブスクライバーで形式を検証し、不正なメッセージをデッドレター トピックに送る"
+    d: "スキーマを使わない BigQuery サブスクリプションを作成し、メッセージを data 列にそのまま書き込む"
+    e: "Dataflow のストリーミング パイプラインで形式を検証してから、BigQuery に書き込む"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。トピックにスキーマを関連付けると、スキーマに合わないメッセージは発行時に拒否されます。Avro のスキーマでもエンコードに JSON を指定すれば、ゲートウェイは JSON のまま送れます。"
+    b: "正解です。BigQuery サブスクリプションでトピックのスキーマを使用すると、メッセージの各フィールドが同じ名前の列に書き込まれます。サブスクライバーやパイプラインを運用する必要はありません。"
+    c: "検証はメッセージが発行された後に行われるため、発行の時点で拒否するという要件を満たしません。Cloud Run のサービスを運用する手間も増えます。"
+    d: "メッセージ全体が1つの列に書き込まれるため、項目ごとの列として扱えません。形式の誤ったメッセージも防げません。"
+    e: "発行の時点では拒否できず、運用するパイプラインが増えます。変換が不要なので、Dataflow を使う理由もありません。"
+  explanation: |
+    **Pub/Sub のスキーマ** は、トピックに発行されるメッセージの形式を強制する機能です。
+
+    - スキーマの種類：Avro または Protocol Buffers
+    - エンコード：JSON またはバイナリ
+    - スキーマに合わないメッセージは発行時に拒否され、パブリッシャーにエラーが返る
+    - 互換性のあるリビジョンを追加して、スキーマを変更できる
+
+    **BigQuery サブスクリプション** は、受け取ったメッセージを BigQuery の既存のテーブルに書き込むエクスポート型のサブスクリプションです。列への書き込み方を選べます。
+
+    | 設定 | 書き込み方 |
+    | --- | --- |
+    | トピックのスキーマを使用 | スキーマのフィールドを同じ名前の列に書き込む（型の互換性が必要） |
+    | テーブルのスキーマを使用 | JSON メッセージのフィールドを、テーブルの同じ名前の列に書き込む |
+    | スキーマなし | メッセージの本文を data 列に書き込む |
+
+    メタデータの書き込みを有効にすると、message_id、publish_time、属性なども列に保存できます。配信は少なくとも1回なので、重複は BigQuery 側で取り除きます。複雑な変換や集計が必要な場合は Dataflow を使います。
+  references:
+    - title: "スキーマの概要"
+      url: "https://docs.cloud.google.com/pubsub/docs/schemas"
+    - title: "BigQuery サブスクリプション"
+      url: "https://docs.cloud.google.com/pubsub/docs/bigquery"
+
+- id: ingest-services-007
+  domain: ingest
+  services: [pubsub, cloud-storage, dataflow]
+  type: single
+  question: |
+    あるオンラインゲーム会社は、ゲームサーバーのログを1つの Pub/Sub トピックに送っています。ログは毎秒数万件で、各メッセージには severity 属性（INFO、WARN、ERROR など）が付いています。監査のため、severity が ERROR のログだけを Cloud Storage に Avro ファイルとして保存したいと考えています。メッセージの変換は不要です。パブリッシャーの実装は変更できず、新たな処理基盤も運用したくありません。
+
+    最も運用の手間が少ない方法はどれですか？
+  choices:
+    a: "severity 属性が ERROR のメッセージだけを通すフィルタを付けて、Avro 形式で書き込む Cloud Storage サブスクリプションを作成する"
+    b: "フィルタのない Cloud Storage サブスクリプションで全ログを保存し、ERROR 以外を含むファイルをライフサイクル ルールで削除する"
+    c: "Dataflow のストリーミング パイプラインで severity を判定し、ERROR のメッセージだけを Cloud Storage に書き込む"
+    d: "push 型サブスクリプションで Cloud Run functions を呼び出し、ERROR のメッセージを Cloud Storage のファイルに書き込む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。サブスクリプションのフィルタで属性を条件にすると、条件に合うメッセージだけが配信され、それ以外は Pub/Sub が自動で確認応答します。Cloud Storage サブスクリプションなら、サブスクライバーを用意せずにファイルに書き込めます。"
+    b: "ライフサイクル ルールはオブジェクトの経過日数などを条件に削除する機能で、ファイルの中身では選別できません。1つのファイルに ERROR とそれ以外のログが混在します。"
+    c: "要件は満たせますが、Dataflow のジョブを新たに運用する必要があります。変換が不要なら、Cloud Storage サブスクリプションで足ります。"
+    d: "メッセージごとに関数が呼び出され、ファイルにまとめる処理も自分で実装する必要があります。毎秒数万件の量では運用も複雑になります。"
+  explanation: |
+    変換が不要なメッセージを保存するときは、**エクスポート型のサブスクリプション** と **サブスクリプションのフィルタ** を組み合わせると、処理基盤を持たずに済みます。
+
+    **サブスクリプションのフィルタ**
+
+    - 条件に使えるのはメッセージの **属性** だけで、本文（data）の内容では絞り込めない
+    - 条件に合わないメッセージは、Pub/Sub が自動で確認応答する
+    - 同じトピックのサブスクリプションごとに、異なるフィルタを設定できる
+    - フィルタはサブスクリプションの作成時に設定する。条件を変えるときはサブスクリプションを作り直す
+
+    **Cloud Storage サブスクリプション**
+
+    - 受け取ったメッセージを、既存のバケットにファイルとして書き込む
+    - 出力形式はテキストまたは Avro。新しいファイルを作るまでの時間やファイルのサイズで、まとめ方を調整できる
+    - 書き込めないメッセージは、デッドレター トピックに転送できる
+    - 軽い加工なら単一メッセージ変換（SMT）を付けられる。複雑な変換や集計には Dataflow を使う
+  references:
+    - title: "Cloud Storage サブスクリプション"
+      url: "https://docs.cloud.google.com/pubsub/docs/cloudstorage"
+    - title: "サブスクリプションのメッセージをフィルタする"
+      url: "https://docs.cloud.google.com/pubsub/docs/subscription-message-filter"
+
+- id: ingest-services-008
+  domain: ingest
+  services: [kafka, pubsub, datastream]
+  type: single
+  question: |
+    ある通信事業者は、オンプレミスで自社運用している Apache Kafka のクラスタ（数百のトピック）を Google Cloud に移行する計画です。ブローカーのパッチ適用や容量の調整に追われており、これらの運用をなくしたいと考えています。プロデューサーとコンシューマーは Kafka のクライアント ライブラリで実装されており、コードはほとんど変更したくありません。移行中もデータを同期し、切り替え時の停止時間を最小限にする必要があります。
+
+    どうすればよいですか？
+  choices:
+    a: "Managed Service for Apache Kafka のクラスタを作成し、MirrorMaker 2.0 で複製してから接続先を切り替える"
+    b: "Pub/Sub にトピックを作成し、プロデューサーとコンシューマーを Pub/Sub のクライアント ライブラリで書き直してから切り替える"
+    c: "Compute Engine の VM に Kafka のクラスタを構築し、MirrorMaker 2.0 でトピックを複製してから、クライアントの接続先を切り替える"
+    d: "Datastream でオンプレミスの Kafka のトピックを読み取り、Managed Service for Apache Kafka のクラスタに継続的に複製する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Managed Service for Apache Kafka は Apache Kafka と互換性があるため、クライアントは接続先と認証の設定を変えるだけで使えます。MirrorMaker 2.0 を使えば、移行中もデータを同期できます。"
+    b: "Pub/Sub は Kafka のプロトコルと互換性がないため、アプリケーションの書き直しが必要です。コードをほとんど変更しないという要件に反します。"
+    c: "データの同期はできますが、ブローカーのパッチ適用や容量の調整を引き続き自社で行う必要があります。運用をなくしたいという要件に反します。"
+    d: "Datastream はデータベースの変更データをキャプチャするサービスで、Kafka をソースにできません。"
+  explanation: |
+    **Managed Service for Apache Kafka** は、Apache Kafka のクラスタを Google Cloud が運用するマネージド サービスです。ブローカーの管理、パッチ適用、容量の調整を任せられ、既存の Kafka クライアントやツールをそのまま使えます。
+
+    自社運用の Kafka から移行するときは、**MirrorMaker 2.0** でトピックのデータをほぼリアルタイムに複製するのが推奨の方法です。
+
+    1. Managed Service for Apache Kafka のクラスタを作成する
+    2. MirrorMaker 2.0 で移行元のトピックを複製する（Kafka Connect クラスタで MirrorMaker 2.0 のソース コネクタとして動かすこともできる）
+    3. 複製が追いついたことを確かめて、クライアントの接続先を新しいクラスタに切り替える
+    4. 問題がないことを確かめてから、移行元のクラスタを停止する
+
+    切り替えの間は、通知の送信など1回だけ実行すべき処理を一時的に止めておくと安全です。
+  diagram: |
+    flowchart TD
+      subgraph OP["オンプレミス"]
+        K1["自社運用の Kafka"]
+      end
+      K1 -->|トピックを複製| M["MirrorMaker 2.0"]
+      M --> K2["Managed Service for<br/>Apache Kafka"]
+      C["プロデューサー<br/>コンシューマー"] -.->|切り替え前| K1
+      C -->|切り替え後| K2
+  references:
+    - title: "MirrorMaker 2.0 を使用して Kafka データを Google Cloud に移行する"
+      url: "https://docs.cloud.google.com/managed-service-for-apache-kafka/docs/move-kafka-mirrormaker"
+    - title: "コネクタの概要"
+      url: "https://docs.cloud.google.com/managed-service-for-apache-kafka/docs/connect-cluster/connectors-overview"
+
+- id: ingest-services-009
+  domain: ingest
+  services: [kafka, bigquery, dataproc, datastream]
+  type: single
+  question: |
+    ある旅行予約サイトは、予約とキャンセルのイベントを Managed Service for Apache Kafka のトピックに送っています。分析チームは、これらのイベントを数分以内に BigQuery で分析したいと考えています。メッセージの変換は不要です。開発チームは Kafka Connect の扱いに慣れており、独自のコンシューマーのコードは書かずに、マネージドな仕組みで取り込みたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Kafka Connect クラスタを作成し、BigQuery Sink コネクタでトピックのメッセージを BigQuery のテーブルに書き込む"
+    b: "Dataproc のクラスタで Spark Structured Streaming のジョブを作成し、トピックを読み取って BigQuery に書き込む"
+    c: "Datastream のストリームを作成し、Kafka のトピックをソースとして BigQuery のテーブルに複製する"
+    d: "Compute Engine の VM でコンシューマーのアプリケーションを動かし、レガシーのストリーミング API で行を挿入する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Managed Service for Apache Kafka の Kafka Connect クラスタでは、BigQuery Sink コネクタを設定するだけで、トピックのメッセージを BigQuery に書き込めます。コードを書かずに、マネージドな環境で動かせます。"
+    b: "Spark のコードを書く必要があり、Dataproc のクラスタも運用することになります。コードを書かずに取り込みたいという要件に反します。"
+    c: "Datastream はデータベースの変更データをキャプチャするサービスで、Kafka のトピックをソースにできません。"
+    d: "コンシューマーのコードと VM の運用が必要です。新しく実装するなら、レガシーのストリーミング API より Storage Write API が推奨されます。"
+  explanation: |
+    Managed Service for Apache Kafka では、**Kafka Connect クラスタ** を作成して、あらかじめ用意されたコネクタを動かせます。Connect クラスタは、Kafka クラスタに関連付けて作成する、Kafka Connect のマネージドな実行環境です。
+
+    | コネクタ | 用途 |
+    | --- | --- |
+    | BigQuery Sink | トピックのメッセージを BigQuery のテーブルに書き込む |
+    | Cloud Storage Sink | トピックのメッセージを Cloud Storage に書き込む |
+    | Pub/Sub Source / Sink | Pub/Sub との間でメッセージを受け渡す |
+    | MirrorMaker 2.0 | Kafka クラスタの間でトピックを複製する |
+
+    BigQuery Sink コネクタでは、書き込み先のプロジェクト、データセット、読み取るトピックなどを設定します。コネクタが BigQuery に書き込むためのサービス アカウントには、BigQuery データ編集者などのロールが必要です。
+
+    取り込みの途中で変換や集計が必要な場合は、Dataflow の Kafka から BigQuery へのテンプレートや、Apache Beam のパイプラインを使います。
+  references:
+    - title: "BigQuery Sink コネクタを作成する"
+      url: "https://docs.cloud.google.com/managed-service-for-apache-kafka/docs/connect-cluster/create-bq-connector"
+    - title: "Kafka Connect の概要"
+      url: "https://docs.cloud.google.com/managed-service-for-apache-kafka/docs/kafka-connect-overview"
+
+- id: ingest-services-010
+  domain: ingest
+  services: [dataproc, cloud-storage, dataflow, bigquery]
+  type: single
+  question: |
+    ある地方銀行は、オンプレミスの Hadoop クラスタで Spark と Hive のバッチジョブを数百本運用しており、HDFS には約 500 TB のデータがあります。Google Cloud への移行にあたり、次の要件があります。
+
+    - 既存の Spark と Hive のコードは、できるだけ変更しない
+    - 計算と保存を分け、ジョブを実行するときだけクラスタを起動できるようにする
+    - クラスタを削除しても、データは失われないようにする
+
+    どの方法が最も適切ですか？
+  choices:
+    a: "データを Cloud Storage に移し、ジョブの入出力パスを gs:// に変えて Dataproc で実行する"
+    b: "Dataproc のクラスタの永続ディスクに HDFS を構成してデータを移し、クラスタを常時稼働させる"
+    c: "Spark のジョブを Apache Beam で書き直し、データを Cloud Storage に移して Dataflow で実行する"
+    d: "Hive のテーブルを BigQuery に移し、Spark と Hive のジョブを BigQuery の SQL に書き直す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataproc には Cloud Storage コネクタが組み込まれており、パスを gs:// に変えるだけで、既存のジョブから Cloud Storage を読み書きできます。データがクラスタの外にあるため、クラスタは必要なときだけ起動して削除できます。"
+    b: "計算と保存が分かれず、データを残すにはクラスタを常に動かしておく必要があります。クラスタを削除するとデータも失われます。"
+    c: "ジョブをすべて書き直す必要があり、既存のコードをできるだけ変更しないという要件に反します。"
+    d: "将来の最適化の選択肢にはなりますが、ジョブの全面的な書き直しが必要です。既存のコードをできるだけ変更しないという要件に反します。"
+  explanation: |
+    Hadoop や Spark のワークロードをそのまま移す（リフト＆シフト）ときは、**Dataproc** を使い、データの保存先を HDFS から **Cloud Storage** に変えるのが推奨の方法です。
+
+    | 保存先 | 特徴 |
+    | --- | --- |
+    | Cloud Storage（gs://） | クラスタを削除してもデータが残る。複数のクラスタや BigQuery などのサービスから同じデータを使える |
+    | クラスタ上の HDFS | クラスタと一緒に消える。データを残すにはクラスタを動かし続ける必要がある |
+
+    Cloud Storage コネクタは Dataproc に最初から組み込まれています。HDFS にデータを移さなくても、gs:// のパスで Spark や Hive のジョブから直接読み書きできます。Hive のテーブル定義も、LOCATION を gs:// のパスに変えれば使い続けられます。
+
+    データを Cloud Storage に置くと、ジョブごとにクラスタを作成し、終わったら削除する使い方ができます。クラスタの台数や構成も、ジョブに合わせて選べます。
+
+    なお、最近のドキュメントでは、Dataproc は Managed Service for Apache Spark という名称になっています。試験ガイドでは Dataproc の名称が使われています。
+  diagram: |
+    flowchart TD
+      subgraph OP["オンプレミス"]
+        H["Hadoop クラスタ<br/>HDFS"]
+      end
+      H -->|データを移行| GCS["Cloud Storage<br/>gs://"]
+      D1["Dataproc クラスタ<br/>Spark ジョブ"] -->|読み書き| GCS
+      D2["Dataproc クラスタ<br/>Hive ジョブ"] -->|読み書き| GCS
+      GCS --> BQ["BigQuery など<br/>他のサービス"]
+  references:
+    - title: "Cloud Storage コネクタ"
+      url: "https://docs.cloud.google.com/dataproc/docs/concepts/connectors/cloud-storage"
+
+- id: ingest-services-011
+  domain: ingest
+  services: [dataproc, cloud-storage]
+  type: single
+  question: |
+    ある製薬会社は、Dataproc のクラスタで、PySpark による化合物データの解析ジョブを実行しています。すべてのノードに、社内で開発した Python ライブラリと監視エージェントをインストールする必要があります。ライブラリは毎週のように更新されます。クラスタは毎朝作成して夜に削除しており、日中はオートスケーリングでノードを増減させています。後から追加されたノードにも、同じものが自動でインストールされる必要があります。ライブラリを更新するたびにイメージを作り直す手間は避けたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "インストール用のスクリプトを Cloud Storage に置き、クラスタの作成時に初期化アクションとして指定する"
+    b: "ライブラリと監視エージェントを組み込んだカスタム イメージを作成し、ライブラリを更新するたびにイメージを作り直す"
+    c: "クラスタの作成後に各ノードへ SSH で接続し、ライブラリと監視エージェントを手作業でインストールする"
+    d: "PySpark のジョブの先頭に pip でライブラリをインストールする処理を加え、ジョブを実行するたびにインストールする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。初期化アクションは、クラスタの作成時に全ノードで実行されるスクリプトで、オートスケーリングで追加されたノードでも実行されます。スクリプトを更新すれば、翌朝に作成するクラスタから新しいライブラリが入ります。"
+    b: "全ノードに同じものを入れられますが、ライブラリを更新するたびにイメージを作り直す必要があり、要件に反します。"
+    c: "手作業のため漏れが起きやすく、オートスケーリングで追加されたノードには自動で入りません。"
+    d: "ジョブの先頭の処理はドライバでしか実行されないため、ワーカーノードにはライブラリが入りません。監視エージェントもインストールできません。"
+  explanation: |
+    Dataproc のクラスタのノードにソフトウェアを追加する方法は、主に2つあります。
+
+    | 方法 | 仕組み | 向いている場合 |
+    | --- | --- | --- |
+    | 初期化アクション | クラスタの作成時に、Cloud Storage に置いたスクリプトを全ノードで実行する | 内容を頻繁に変える、手軽に始めたい |
+    | カスタム イメージ | 必要なソフトウェアを組み込んだイメージからノードを作成する | 内容が安定している、クラスタの起動時間を短くしたい |
+
+    初期化アクションの注意点:
+
+    - スケールアップやオートスケーリングで追加されたノードでも実行される
+    - スクリプトは自社のバケットに置いてバージョンを管理する。Google が公開しているバケット（gs://goog-dataproc-initialization-actions-REGION）のスクリプトは GitHub の変更に合わせて更新されるため、本番のクラスタから直接参照しない
+    - インストールに時間がかかるほど、クラスタの作成も遅くなる
+  references:
+    - title: "初期化アクション"
+      url: "https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/init-actions"
+
+- id: ingest-services-012
+  domain: ingest
+  services: [dataproc]
+  type: single
+  question: |
+    あるデジタル広告の企業は、常時稼働する Dataproc のクラスタで、広告配信ログを集計する Spark のバッチジョブを実行しています。ジョブの数は時間帯によって大きく変わり、ピーク時にはリソースが足りず、夜間はノードの大半が遊んでいます。入出力のデータはすべて Cloud Storage にあります。
+
+    負荷に応じてノード数を自動で増減させたいと考えています。ただし、ノードを減らすときに、実行中のタスクが失敗したり HDFS のデータが失われたりしないようにする必要があります。
+
+    どうすればよいですか？
+  choices:
+    a: "オートスケーリング ポリシーでセカンダリ ワーカーだけを増減させ、グレースフル デコミッションのタイムアウトを設定する"
+    b: "オートスケーリング ポリシーでプライマリ ワーカーを大きく増減させ、ノードをすぐに削除できるようグレースフル デコミッションを無効にする"
+    c: "Cloud Scheduler で時間帯ごとにクラスタの更新コマンドを実行し、あらかじめ決めた台数にワーカーを変更する"
+    d: "ピーク時に合わせた台数でワーカーを固定し、夜間は余ったリソースで別のジョブを実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。セカンダリ ワーカーは HDFS のデータを持たないため、増減させても HDFS に影響しません。グレースフル デコミッションのタイムアウトを設定すると、削除するノードで実行中の処理が終わるのを待ってから削除されます。"
+    b: "プライマリ ワーカーは HDFS のデータを持つため、大きく減らすとデータの移動や消失の危険があります。グレースフル デコミッションを無効にすると、実行中のタスクも失敗します。"
+    c: "時間帯で決めた台数に変えるだけで、実際の負荷には追従しません。負荷に応じて自動で増減させたいという要件を満たしません。"
+    d: "ノード数は変わらず、夜間に遊んでいるリソースの問題も解決しません。負荷に応じて自動で増減させたいという要件を満たしません。"
+  explanation: |
+    Dataproc の **オートスケーリング ポリシー** は、YARN のメモリの使用状況をもとに、クラスタのワーカー数を自動で増減させます。
+
+    安全にスケーリングするためのポイント:
+
+    - **セカンダリ ワーカーを増減させる**：セカンダリ ワーカーは HDFS のデータノードを持たないため、削除しても HDFS のデータを移す必要がない
+    - **プライマリ ワーカーの数は固定するか、変動を小さくする**：HDFS のデータを持つため、減らすとデータの移動が発生する
+    - **グレースフル デコミッションのタイムアウトを設定する**：削除するノードの処理が終わるのを待ってから削除する。クラスタで最も長く実行されるジョブより長くするのが目安
+    - **データは Cloud Storage に置く**：HDFS への依存が減り、ノード数を変えやすくなる
+
+    シャッフルのデータをプライマリ ワーカーに置く Enhanced Flexibility Mode（EFM）を使うと、セカンダリ ワーカーをさらに積極的に増減させられます。
+  references:
+    - title: "クラスタの自動スケーリング"
+      url: "https://docs.cloud.google.com/managed-spark/docs/concepts/configuring-clusters/autoscaling"
+    - title: "クラスタのスケーリング"
+      url: "https://docs.cloud.google.com/dataproc/docs/concepts/configuring-clusters/scaling-clusters"
+
+- id: ingest-services-013
+  domain: ingest
+  services: [dataproc, cloud-sql, cloud-storage]
+  type: single
+  question: |
+    ある保険会社は、ジョブごとに Dataproc のクラスタを作成し、終わったら削除する運用をしています。Spark と Hive のジョブは Cloud Storage のデータを読み書きしていますが、テーブル定義はクラスタごとの Hive メタストアに作成しているため、クラスタを削除すると定義も消え、次のクラスタで作り直す必要があります。
+
+    複数のクラスタで同じテーブル定義を共有し、クラスタを削除しても定義が残るようにしたいと考えています。メタストア用のデータベースの運用は避けたいです。
+
+    どうすればよいですか？
+  choices:
+    a: "Dataproc Metastore のサービスを作成し、各クラスタの作成時にそのサービスをメタストアとして指定する"
+    b: "Cloud SQL に Hive メタストア用のデータベースを作成し、初期化アクションで各クラスタから接続するよう設定する"
+    c: "クラスタを削除せずに常時稼働させ、すべてのジョブを同じクラスタの Hive メタストアで実行する"
+    d: "テーブル定義の DDL をすべて Cloud Storage に保存し、各ジョブの最初に実行して定義を作り直す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Dataproc Metastore はフルマネージドの Hive メタストアです。複数のクラスタから同じメタストアを使えるため、クラスタを削除してもテーブル定義が残り、データベースの運用も不要です。"
+    b: "定義は共有できますが、Cloud SQL のデータベースとメタストアの構成を自分で管理する必要があります。データベースの運用を避けたいという要件に反します。"
+    c: "定義は残りますが、ジョブごとにクラスタを作成・削除する運用をやめることになります。クラスタを動かし続けるコストも増えます。"
+    d: "ジョブのたびに定義を作り直す処理が必要で、DDL の管理漏れや実行時間の増加につながります。定義を共有する仕組みにはなりません。"
+  explanation: |
+    **Dataproc Metastore** は、Google Cloud が運用するフルマネージドの Apache Hive メタストア（HMS）です。
+
+    - Dataproc のクラスタの作成時に指定すると、そのクラスタの Spark や Hive が Dataproc Metastore のテーブル定義を使う
+    - クラスタとは独立したサービスのため、クラスタを削除しても定義が残る
+    - 複数のクラスタや、異なるオープンソースのエンジンから同じメタデータを使える
+
+    エフェメラル（一時的）なクラスタを使う構成では、計算、データ、メタデータを次のように分けるのが定石です。
+
+    | 要素 | 置き場所 |
+    | --- | --- |
+    | 計算 | ジョブごとに作成・削除する Dataproc のクラスタ |
+    | データ | Cloud Storage |
+    | テーブル定義 | Dataproc Metastore |
+
+    外部テーブルとして定義しておけば、テーブルを削除しても Cloud Storage 上のデータは残ります。
+  diagram: |
+    flowchart TD
+      C1["Dataproc クラスタ A<br/>Spark ジョブ"] --> M["Dataproc Metastore<br/>テーブル定義"]
+      C2["Dataproc クラスタ B<br/>Hive ジョブ"] --> M
+      C1 --> G["Cloud Storage<br/>データ"]
+      C2 --> G
+  references:
+    - title: "Dataproc Metastore の概要"
+      url: "https://docs.cloud.google.com/dataproc-metastore/docs/overview"
+    - title: "Managed Service for Apache Spark クラスタまたはセルフマネージド クラスタを接続する"
+      url: "https://docs.cloud.google.com/dataproc-metastore/docs/attach-dataproc"
+
+- id: ingest-services-014
+  domain: ingest
+  services: [dataproc, bigquery, cloud-storage]
+  type: single
+  question: |
+    あるオンライン学習サービスでは、2名のデータエンジニアが、1日に数回 PySpark のジョブを実行しています。ジョブは BigQuery にある学習履歴のテーブル（数 TB）を読み、特徴量を計算して BigQuery に書き戻します。現在は、BigQuery のテーブルを CSV で Cloud Storage にエクスポートしてから、Dataproc のクラスタで処理しています。エクスポートに時間がかかるうえ、クラスタのサイズ調整や保守も負担になっています。
+
+    既存の PySpark のコードをできるだけ使い続けながら、クラスタの管理をなくし、中間ファイルを介さずに BigQuery を読み書きしたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Serverless for Apache Spark のバッチ ワークロードとして実行し、Spark 用 BigQuery コネクタでテーブルを直接読み書きする"
+    b: "Serverless for Apache Spark のバッチ ワークロードとして実行し、引き続きエクスポートした CSV を Cloud Storage から読み込む"
+    c: "Dataproc のクラスタを常時稼働させ、Spark 用 BigQuery コネクタでテーブルを直接読み書きする"
+    d: "PySpark の処理を BigQuery の SQL で書き直し、スケジュールされたクエリとして実行する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Serverless for Apache Spark では、クラスタを作成・管理せずに Spark のジョブを実行でき、リソースも自動で調整されます。BigQuery コネクタは Storage Read API でテーブルを直接読むため、エクスポートは不要です。"
+    b: "クラスタの管理はなくなりますが、エクスポートによる中間ファイルと待ち時間が残ります。中間ファイルを介さずに読み書きしたいという要件に反します。"
+    c: "エクスポートは不要になりますが、クラスタの管理が残ります。常時稼働させると、ジョブを実行していない時間のコストもかかります。"
+    d: "既存の PySpark のコードを使えず、処理を全面的に書き直す必要があります。"
+  explanation: |
+    **Serverless for Apache Spark**（旧称 Dataproc Serverless）は、クラスタを作成・管理せずに Spark のワークロードを実行できるサービスです。
+
+    - PySpark などのジョブをバッチ ワークロードとして送信するだけで実行できる
+    - 必要なリソースは自動で割り当てられ、ジョブが終われば解放される
+    - クラスタのサイズ調整や保守が不要
+
+    **Spark 用 BigQuery コネクタ** を使うと、Spark から BigQuery のテーブルを直接読み書きできます。
+
+    | 処理 | 仕組み |
+    | --- | --- |
+    | 読み取り | Storage Read API で並列に読む。列の選択や行のフィルタは BigQuery 側で適用される |
+    | 書き込み（direct） | Storage Write API で直接書き込む |
+    | 書き込み（indirect） | いったん Cloud Storage に書き出し、BigQuery の読み込みジョブで取り込む |
+
+    なお、最近のドキュメントでは、Dataproc のクラスタと Serverless for Apache Spark が Managed Service for Apache Spark という名称にまとめられ、それぞれクラスタとサーバーレスのデプロイとして扱われています。試験ガイドでは Dataproc の名称が使われています。
+  references:
+    - title: "Managed Service for Apache Spark のサーバーレスの概要"
+      url: "https://docs.cloud.google.com/managed-spark/docs/serverless-overview"
+    - title: "Spark BigQuery コネクタを使用する"
+      url: "https://docs.cloud.google.com/managed-spark/docs/tutorials/bigquery-connector-spark-example"
+
+- id: ingest-services-015
+  domain: ingest
+  services: [data-fusion, dataflow, dataform, composer]
+  type: single
+  question: |
+    ある不動産会社では、業務部門のデータ担当者が、取引先から Cloud Storage に届く CSV、社内の SQL Server のデータベース、SaaS の顧客管理システムのデータを集め、クレンジングと結合をしてから BigQuery に取り込みたいと考えています。担当者にはプログラミングの経験がなく、パイプラインの作成や変更を自分たちで行いたいと考えています。
+
+    どのサービスを使うべきですか？
+  choices:
+    a: "Cloud Data Fusion で、ソースとシンクのプラグインを画面上に配置し、Wrangler でクレンジングするパイプラインを作成する"
+    b: "Dataflow で Apache Beam のパイプラインを Python で作成し、Flex テンプレートとして担当者が実行できるようにする"
+    c: "Dataform で SQLX ファイルを作成し、各ソースのデータを BigQuery に取り込んでから変換する"
+    d: "Cloud Composer で、各ソースからデータを取り込むタスクを Python の DAG として作成する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Cloud Data Fusion は画面上でパイプラインを作成できるサービスで、データベースや SaaS などに接続するプラグインが用意されています。Wrangler でデータを見ながらクレンジングでき、コードを書く必要はありません。"
+    b: "パイプラインの作成や変更に Python のコードが必要です。プログラミングの経験がない担当者が自分たちで変更するという要件に反します。"
+    c: "Dataform は BigQuery の中にあるデータを SQL で変換するサービスで、SQL Server や SaaS からデータを取り込む機能はありません。"
+    d: "Cloud Composer はワークフローのオーケストレーションのサービスで、DAG を Python で書く必要があります。要件に反します。"
+  explanation: |
+    **Cloud Data Fusion** は、オープンソースの CDAP をもとにしたフルマネージドのデータ統合サービスです。コードを書かずに ETL / ELT のパイプラインを作成できます。
+
+    | 機能 | 内容 |
+    | --- | --- |
+    | Studio | ソース、変換、シンクなどのプラグインを画面上でつないでパイプラインを作る |
+    | プラグイン | データベース、ファイル、SaaS などへの接続や変換の部品。Hub から追加できる |
+    | Wrangler | データのサンプルを見ながら、ディレクティブ（変換の指示）でクレンジングする |
+    | レプリケーション | SQL Server や MySQL などのデータベースの変更を、BigQuery に継続的に複製する |
+
+    作成したパイプラインは、既定では実行のたびに作成されるエフェメラルな Dataproc のクラスタ上で、Spark のジョブとして実行されます。
+
+    | サービス | 向いている用途 |
+    | --- | --- |
+    | Cloud Data Fusion | コードを書かずに、多様なソースからのパイプラインを作る |
+    | Dataflow | コードで、大規模なバッチ・ストリーミング処理を作る |
+    | Dataform | BigQuery の中のデータを SQL で変換する |
+    | Cloud Composer | 複数のサービスにまたがるジョブの実行順序を管理する |
+  references:
+    - title: "Wrangler の概要"
+      url: "https://docs.cloud.google.com/data-fusion/docs/concepts/wrangler-overview"
+    - title: "プラグインの概要"
+      url: "https://docs.cloud.google.com/data-fusion/docs/concepts/plugins"
+    - title: "レプリケーションの概要"
+      url: "https://docs.cloud.google.com/data-fusion/docs/concepts/replication"
+
+- id: ingest-services-016
+  domain: ingest
+  services: [bigquery, cloud-storage]
+  type: single
+  question: |
+    ある食品卸の企業は、基幹システムから毎晩数百 GB の受発注データを書き出し、Cloud Storage を経由して BigQuery に LOAD DATA 文で読み込んでいます。現在は gzip で圧縮した大きな CSV ファイルを使っていますが、読み込みに時間がかかるうえ、届け先や明細などの入れ子になった情報を表現できず、列の型が意図どおりにならないこともあります。基幹システムの書き出し形式は変更できます。
+
+    読み込みを速くし、型と入れ子の構造をファイルから正しく取り込みたいと考えています。どの形式で書き出すべきですか？
+  choices:
+    a: "ブロック単位で圧縮した Avro ファイルで書き出し、形式に AVRO を指定して読み込む"
+    b: "gzip で圧縮した改行区切りの JSON で書き出し、スキーマの自動検出を有効にして読み込む"
+    c: "圧縮しない CSV で書き出し、列の型を定義したスキーマ ファイルを別に用意して読み込む"
+    d: "gzip で圧縮した CSV のまま書き出し、読み込み時に許容する不正なレコードの数を増やす"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Avro はスキーマをファイル内に持つため、型や入れ子の構造をそのまま取り込めます。データ ブロックを圧縮していても BigQuery は並列に読み込めるため、Avro は読み込みに推奨される形式です。"
+    b: "JSON なら入れ子を表現できますが、gzip で圧縮したファイルは並列に読み込めません。自動検出では型がデータの内容から推測されるため、意図どおりにならないことがあります。"
+    c: "圧縮しなければ並列に読み込めますが、CSV では入れ子や繰り返しの構造を表現できません。"
+    d: "読み込みは遅いままで、入れ子の構造も表現できません。不正なレコードを読み飛ばすだけで、型の問題も解決しません。"
+  explanation: |
+    BigQuery へのバッチ読み込みでは、ファイル形式によって速さと取り込める情報が変わります。
+
+    | 形式 | スキーマ | 入れ子・繰り返し | 圧縮と読み込み |
+    | --- | --- | --- | --- |
+    | Avro | ファイル内に持つ | 表現できる | ブロック単位の圧縮でも並列に読める（読み込みに推奨） |
+    | Parquet / ORC | ファイル内に持つ | 表現できる | 列指向の形式で、ファイル内の圧縮に対応 |
+    | JSON（改行区切り） | 指定するか自動検出 | 表現できる | gzip で圧縮すると並列に読めない |
+    | CSV | 指定するか自動検出 | 表現できない | gzip で圧縮すると並列に読めない |
+
+    gzip はファイル全体を圧縮するため、BigQuery は1つのファイルを並列に読めません。Avro の圧縮（Snappy、DEFLATE、ZSTD）はファイルの中のデータ ブロックごとに行われるため、圧縮したまま並列に読み込めます。
+
+    LOAD DATA 文を使うと、読み込みを SQL で書けます。
+
+    ```sql
+    LOAD DATA INTO wholesale.orders
+    FROM FILES (
+      format = 'AVRO',
+      uris = ['gs://example-bucket/orders/2026-10-17/*.avro']
+    );
+    ```
+
+    既存のデータを置き換える場合は LOAD DATA OVERWRITE を使います。
+  references:
+    - title: "Cloud Storage からの Avro データの読み込み"
+      url: "https://docs.cloud.google.com/bigquery/docs/loading-data-cloud-storage-avro"
+    - title: "Cloud Storage からの CSV データの読み込み"
+      url: "https://docs.cloud.google.com/bigquery/docs/loading-data-cloud-storage-csv"
+
+- id: ingest-services-017
+  domain: ingest
+  services: [bigquery, pubsub]
+  type: single
+  question: |
+    ある送金サービスのフィンテック企業は、Java のアプリケーションから BigQuery に取引イベントを直接ストリーミングで書き込んでいます。現在はレガシーの insertAll API を使っていますが、ネットワーク障害のときにアプリケーションが再試行すると、同じ取引の行が重複して書き込まれることがあります。取り込みの費用も抑えたいと考えています。
+
+    再試行しても行が重複しないことを、BigQuery への書き込みの仕組みで保証したいと考えています。どうすればよいですか？
+  choices:
+    a: "Storage Write API で COMMITTED タイプのストリームを作り、書き込みごとにオフセットを指定する"
+    b: "レガシーの insertAll API を使い続け、各行に一意の insertId を設定してから書き込む"
+    c: "Storage Write API に切り替え、テーブルごとに用意されたデフォルト ストリームにオフセットなしで書き込む"
+    d: "取引イベントをいったん Pub/Sub に送り、BigQuery サブスクリプションで取引のテーブルに書き込ませる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。COMMITTED タイプのストリームでオフセットを指定すると、すでに書き込まれたオフセットへの書き込みは受け付けられないため、再試行しても行は重複しません。Storage Write API はレガシーのストリーミング API より費用も低くなります。"
+    b: "insertId による重複排除はベストエフォートで、短い時間の範囲でしか働きません。重複しないことは保証されません。"
+    c: "デフォルト ストリームの書き込みは少なくとも1回で、再試行による重複は防げません。"
+    d: "BigQuery サブスクリプションの配信は少なくとも1回で、重複が起こりえます。"
+  explanation: |
+    **Storage Write API** は、BigQuery への取り込みに推奨される API です。レガシーのストリーミング API（insertAll）と比べて費用が低く、gRPC のストリーミングで効率よく書き込めます。
+
+    | ストリームのタイプ | 書き込んだ行が見えるタイミング | 主な用途 |
+    | --- | --- | --- |
+    | デフォルト ストリーム | すぐに見える | 少なくとも1回でよいストリーミング |
+    | COMMITTED タイプ | すぐに見える | オフセットを指定した1回限りの書き込み |
+    | PENDING タイプ | ストリームをコミットした時点でまとめて見える | バッチの読み込みをアトミックに行う |
+    | BUFFERED タイプ | 行をフラッシュした時点で見える | 高度な用途（通常は使わない） |
+
+    1回限り（exactly-once）の書き込みにするには、アプリケーションでストリームを作成し、書き込みごとに **オフセット** を指定します。すでに書き込まれたオフセットに再度書き込もうとするとエラーが返るため、再試行しても行は重複しません。
+
+    レガシーの insertAll API の insertId による重複排除は、短い時間の範囲で働くベストエフォートのもので、重複しないことは保証されません。
+  references:
+    - title: "BigQuery Storage Write API の概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/write-api"
+
+- id: ingest-services-018
+  domain: ingest
+  services: [bigquery, pubsub, dataflow]
+  type: single
+  question: |
+    ある EC サイトでは、注文データが Storage Write API で BigQuery のテーブルにリアルタイムに書き込まれています。不正確認チームは、高額な注文や不審な配送先の注文を数秒以内に検知し、Pub/Sub 経由で社内の確認用アプリケーションに通知したいと考えています。検知の条件は SQL で書きたいと考えており、Dataflow などの処理基盤を新たに運用したくありません。
+
+    どうすればよいですか？
+  choices:
+    a: "継続的クエリを作成し、条件に合う行を EXPORT DATA で Pub/Sub のトピックに送る"
+    b: "スケジュールされたクエリを数分ごとに実行し、条件に合う行を Cloud Run のジョブで Pub/Sub に発行する"
+    c: "Dataflow のストリーミング パイプラインで注文データを読み取り、条件に合う行を Pub/Sub に発行する"
+    d: "Pub/Sub の BigQuery サブスクリプションを作成し、注文テーブルに追加された行をトピックに送らせる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。継続的クエリは、テーブルに追加されたデータを SQL で継続的に処理し、結果を Pub/Sub などに送れます。処理基盤を持たずに、数秒程度の遅れで通知できます。"
+    b: "実行の間隔の分だけ検知が遅れ、数秒以内という要件を満たしません。Cloud Run のジョブも運用する必要があります。"
+    c: "Dataflow のパイプラインを新たに開発・運用することになり、処理基盤を増やしたくないという要件に反します。"
+    d: "BigQuery サブスクリプションは、Pub/Sub のメッセージを BigQuery に書き込む機能です。BigQuery の行を Pub/Sub に送ることはできません。"
+  explanation: |
+    **継続的クエリ（continuous queries）** は、BigQuery に取り込まれたデータを SQL で継続的に処理する機能です。テーブルに追加された行を、ほぼリアルタイムに処理して出力できます。
+
+    | 出力先 | 用途 |
+    | --- | --- |
+    | BigQuery のテーブル | 処理結果を別のテーブルに書き込む |
+    | Pub/Sub | 後続のアプリケーションやワークフローに通知する |
+    | Bigtable など | アプリケーションから低レイテンシで参照する |
+
+    使うときのポイント:
+
+    - Enterprise または Enterprise Plus エディションの予約を用意し、ジョブタイプが CONTINUOUS の割り当てを作成する
+    - 長時間実行する場合は、ユーザー アカウントではなくサービス アカウントで実行する
+    - Pub/Sub に送る場合は、送る内容を message という列にする。_ATTRIBUTES 列（JSON 型）の値はメッセージの属性になる
+
+    ```sql
+    EXPORT DATA
+      OPTIONS (
+        format = 'CLOUD_PUBSUB',
+        uri = 'https://pubsub.googleapis.com/projects/my-project/topics/suspicious-orders'
+      )
+    AS (
+      SELECT TO_JSON_STRING(STRUCT(order_id, customer_id, amount)) AS message
+      FROM `my-project.sales.orders`
+      WHERE amount >= 1000000
+    );
+    ```
+  diagram: |
+    flowchart TD
+      A["注文アプリ"] -->|Storage Write API| T["BigQuery<br/>注文テーブル"]
+      T --> Q["継続的クエリ<br/>CONTINUOUS の予約"]
+      Q -->|EXPORT DATA| P["Pub/Sub トピック"]
+      P --> N["確認用アプリ"]
+  references:
+    - title: "継続的クエリの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/continuous-queries-introduction"
+    - title: "継続的クエリを作成する"
+      url: "https://docs.cloud.google.com/bigquery/docs/continuous-queries"
+
+- id: ingest-services-019
+  domain: ingest
+  services: [bigquery, cloud-storage, migration]
+  type: single
+  question: |
+    ある自動車メーカーは、車両の走行ログを Parquet 形式で Cloud Storage に保存しており、データは数 PB に達しています。ファイルは dt=YYYY-MM-DD の形式の日付フォルダに分かれており、ほかのシステムも同じファイルを利用しています。研究チームは、月に数回だけ、特定の期間のログを SQL でアドホックに調べたいと考えています。
+
+    クエリの速さはそれほど求めていません。BigQuery にデータを複製して二重に管理することや、取り込みのパイプラインを作ることは避けたいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "Cloud Storage のファイルを参照する外部テーブルを、hive パーティションの設定を付けて作成する"
+    b: "BigQuery Data Transfer Service で、毎日新しいファイルを BigQuery のネイティブ テーブルに読み込む"
+    c: "LOAD DATA 文で、すべてのファイルを日付でパーティション分割したネイティブ テーブルに読み込む"
+    d: "車両からのログを Storage Write API で BigQuery にも書き込むよう、送信側のシステムを変更する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。外部テーブルなら、データを Cloud Storage に置いたまま SQL で検索できます。hive パーティションの設定を付けると、日付の条件で読むフォルダが絞られ、読み取る量を減らせます。"
+    b: "毎日の取り込みのパイプラインが必要になり、BigQuery にデータが複製されます。要件に反します。"
+    c: "数 PB のデータが BigQuery に複製され、二重に管理することになります。月に数回のアドホックな検索のためには過剰です。"
+    d: "送信側の変更が必要で、データも BigQuery に複製されます。要件に反します。"
+  explanation: |
+    Cloud Storage のデータを BigQuery で検索する方法は、データを **読み込む** か、**外部テーブル** で参照するかのどちらかです。
+
+    | 観点 | ネイティブ テーブルに読み込む | 外部テーブルで参照する |
+    | --- | --- | --- |
+    | データの置き場所 | BigQuery（複製される） | Cloud Storage のまま |
+    | クエリの速さ | 速い | 読み込んだテーブルより遅くなることがある |
+    | DML による更新 | できる | できない（読み取り専用） |
+    | 向いている用途 | 頻繁に検索する、性能が重要 | 検索が少ない、ほかのシステムとファイルを共有する、取り込みを省きたい |
+
+    hive パーティションの形式（例：dt=2026-10-17）でフォルダを分けておくと、外部テーブルでパーティション列として扱えます。WHERE 句で日付を指定すれば、該当するフォルダのファイルだけが読まれます。
+
+    頻繁に検索するようになったデータは、ネイティブ テーブルに読み込むと速くなります。外部テーブルにきめ細かなアクセス制御を加えたい場合は、BigLake テーブルを使います。
+  references:
+    - title: "外部テーブルの概要"
+      url: "https://docs.cloud.google.com/bigquery/docs/external-tables"
+
+- id: ingest-services-020
+  domain: ingest
+  services: [bigquery, migration, cloud-storage, composer]
+  type: single
+  question: |
+    全国に店舗を持つ外食チェーンでは、委託先が毎日深夜に、各店舗の売上集計を CSV ファイルで Cloud Storage の決まったフォルダに置きます。このデータを、毎朝 6 時までに BigQuery のテーブルに追加したいと考えています。変換は不要です。コードやサーバーを管理せずに、実行スケジュールと実行結果の通知を設定したいと考えています。
+
+    どうすればよいですか？
+  choices:
+    a: "BigQuery Data Transfer Service で Cloud Storage からの転送を作成し、毎日早朝に実行されるよう設定する"
+    b: "Storage Transfer Service で転送ジョブを作成し、CSV ファイルを毎日 BigQuery のデータセットに転送する"
+    c: "Cloud Composer の環境を作成し、Cloud Storage から BigQuery に読み込むオペレーターを使う DAG を毎日実行する"
+    d: "Compute Engine の VM で cron を設定し、毎日 bq load コマンドで CSV ファイルをテーブルに読み込む"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。BigQuery Data Transfer Service の Cloud Storage 転送では、ワイルドカードを含む URI を指定し、スケジュールに沿ってファイルを BigQuery に読み込めます。コードもサーバーも不要で、実行結果の通知も設定できます。"
+    b: "Storage Transfer Service はファイルを Cloud Storage などのストレージに転送するサービスで、BigQuery のテーブルには読み込めません。"
+    c: "要件は満たせますが、DAG のコードを書き、Cloud Composer の環境を運用する必要があります。1つの読み込みのためには過剰です。"
+    d: "VM とスクリプトの管理が必要です。コードやサーバーを管理したくないという要件に反します。"
+  explanation: |
+    Cloud Storage のファイルを定期的に BigQuery に取り込むだけなら、**BigQuery Data Transfer Service の Cloud Storage 転送** が最も手間がかかりません。
+
+    - スケジュールを設定するだけで、ファイルをテーブルに読み込む
+    - URI には、ワイルドカードや {run_date} などの実行時パラメータを使える
+    - 書き込み設定が APPEND（既定）の場合、変更されていないファイルは1回だけ読み込まれる
+    - 実行の失敗はメールで、実行の完了（成功・失敗）は Pub/Sub で通知できる
+    - 転送先のテーブルは事前に作成しておく
+    - スケジュールの代わりに、ファイルの到着をきっかけに実行するイベント駆動の転送も設定できる
+
+    | 方法 | 向いている場合 |
+    | --- | --- |
+    | BigQuery Data Transfer Service | 定期的な読み込みだけを、コードなしで行う |
+    | Eventarc と Cloud Run functions | ファイルが届いたらすぐに処理する |
+    | Cloud Composer | 読み込みの前後に、複数のサービスの処理が連なる |
+  references:
+    - title: "Cloud Storage データを BigQuery に読み込む"
+      url: "https://docs.cloud.google.com/bigquery/docs/cloud-storage-transfer"
+    - title: "BigQuery Data Transfer Service の実行通知"
+      url: "https://docs.cloud.google.com/bigquery/docs/transfer-run-notifications"
+
+- id: ingest-services-021
+  domain: ingest
+  services: [datastream, bigquery, data-fusion, migration]
+  type: single
+  question: |
+    ある航空会社は、予約システムのデータベース（Cloud SQL for MySQL）の変更を、分析のために数分以内の遅れで BigQuery に反映したいと考えています。要件は次のとおりです。
+
+    - 本番のデータベースに、定期的な抽出クエリの負荷をかけない
+    - 行の削除も BigQuery に反映する
+    - BigQuery では、ソースと同じ最新の状態のテーブルを参照する
+    - サーバーレスで、インスタンスやクラスタの管理を避ける
+
+    どうすればよいですか？
+  choices:
+    a: "Datastream のストリームを作成し、MySQL のバイナリログから変更を読み取って BigQuery に書き込む"
+    b: "Cloud Data Fusion のレプリケーションで、MySQL のバイナリログから変更を読み取って BigQuery に複製する"
+    c: "Database Migration Service で、Cloud SQL から BigQuery への継続的な移行ジョブを作成する"
+    d: "BigQuery の連携クエリを 5 分ごとにスケジュールし、更新日時が新しい行を MERGE 文で反映する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Datastream はサーバーレスの CDC（変更データ キャプチャ）サービスです。バイナリログから変更を読み取るため本番のデータベースへの負荷が小さく、削除も反映できます。BigQuery の宛先では、ソースと同じ状態のテーブルを維持できます。"
+    b: "ログをもとに複製できますが、Cloud Data Fusion のインスタンスが必要で、複製の処理は Dataproc のクラスタ上で実行されます。インスタンスやクラスタの管理を避けたいという要件に反します。"
+    c: "Database Migration Service は、データベースを Cloud SQL や AlloyDB などに移行するサービスです。BigQuery を移行先にはできません。"
+    d: "定期的なクエリが本番のデータベースに負荷をかけます。更新日時による抽出では、削除された行も検出できません。"
+  explanation: |
+    データベースの変更を継続的に BigQuery に取り込むには、**Datastream** を使います。
+
+    - データベースのログ（MySQL のバイナリログ、Oracle の LogMiner、PostgreSQL の論理デコードなど）から変更を読み取る、サーバーレスの CDC サービス
+    - ストリームの開始時に既存のデータをバックフィルし、その後の変更を継続的に複製する
+    - 宛先は BigQuery または Cloud Storage
+    - ソースへの接続方法は、IP 許可リスト、SSH トンネルによる転送、プライベート接続（VPC ピアリング）などから選ぶ
+
+    | 方法 | 特徴 |
+    | --- | --- |
+    | Datastream | サーバーレス。BigQuery への CDC に推奨 |
+    | Cloud Data Fusion のレプリケーション | Data Fusion のインスタンスで設定し、Dataproc 上で実行する。Data Fusion のほかのパイプラインと一緒に管理したい場合 |
+    | Database Migration Service | データベースどうしの移行（Cloud SQL、AlloyDB など） |
+  diagram: |
+    flowchart TD
+      S["Cloud SQL for MySQL<br/>予約システム"] -->|バイナリログ| D["Datastream<br/>ストリーム"]
+      D -->|バックフィルと<br/>継続的な変更| B["BigQuery<br/>最新状態のテーブル"]
+      B --> A["分析・ダッシュボード"]
+  references:
+    - title: "BigQuery の宛先"
+      url: "https://docs.cloud.google.com/datastream/docs/destination-bigquery"
+    - title: "レプリケーションの概要"
+      url: "https://docs.cloud.google.com/data-fusion/docs/concepts/replication"
+
+- id: ingest-services-022
+  domain: ingest
+  services: [datastream, bigquery]
+  type: multiple
+  question: |
+    あるクレジットカード会社は、Compute Engine 上で自社運用している MySQL の会員データベースの変更を、Datastream で BigQuery に取り込む計画です。監査の要件により、各レコードに対するすべての変更（挿入・更新・削除）を、変更の履歴として BigQuery に残す必要があります。最新の状態だけを保持するテーブルでは要件を満たせません。
+
+    どの設定を組み合わせるべきですか？
+  choices:
+    a: "ソースの MySQL でバイナリログを有効にし、binlog_format を ROW に設定する"
+    b: "BigQuery の宛先の書き込みモードを Append-only（追記のみ）にする"
+    c: "BigQuery の宛先の書き込みモードを Merge（統合）にする"
+    d: "ソースの MySQL で binlog_format を STATEMENT に設定し、バイナリログの量を減らす"
+    e: "BigQuery のテーブルのタイムトラベル期間を最大にし、過去の状態を変更履歴として参照する"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。Datastream は MySQL の行ベースのバイナリログから変更を読み取ります。バイナリログを有効にし、形式を ROW にしておく必要があります。"
+    b: "正解です。Append-only モードでは、挿入・更新・削除のすべての変更がイベントとして行の追加で書き込まれるため、レコードごとの変更履歴を残せます。"
+    c: "Merge モードでは、変更がソースと同じ状態のテーブルに統合され、変更の履歴は残りません。"
+    d: "Datastream は行ベースのバイナリログにだけ対応しており、STATEMENT や MIXED の形式では変更を読み取れません。"
+    e: "タイムトラベルで参照できるのは最大7日前までです。監査のためにすべての履歴を残す用途には使えません。"
+  explanation: |
+    Datastream の BigQuery の宛先には、2つの書き込みモードがあります。
+
+    | モード | BigQuery のテーブル | 向いている用途 |
+    | --- | --- | --- |
+    | Merge | ソースと同じ最新の状態（変更の履歴は残らない） | 現在の状態を分析する |
+    | Append-only | すべての変更をイベントとして追加する | 変更の履歴を残す、監査、ある時点の状態を再現する |
+
+    Merge は既定のモードで、主キーのあるテーブルが対象です。主キーのないテーブルは Append-only で書き込まれます。
+
+    Append-only モードでは、バックフィルとその後のすべての変更が、行の追加として書き込まれます。各行の datastream_metadata 列（STRUCT 型）で、変更の種類（INSERT、UPDATE-INSERT、UPDATE-DELETE、DELETE）や、変更を並べ替えるためのキーを確認できます。
+
+    MySQL をソースにするときの主な前提:
+
+    - バイナリログを有効にする
+    - binlog_format を ROW、binlog_row_image を FULL にする
+    - Datastream が読み終える前にログが削除されないよう、バイナリログの保持期間を十分に取る
+    - レプリケーション用の権限を持つユーザーを作成する
+  references:
+    - title: "BigQuery の宛先を構成する"
+      url: "https://docs.cloud.google.com/datastream/docs/configure-bigquery-destination"
+    - title: "セルフマネージドの MySQL データベースを構成する"
+      url: "https://docs.cloud.google.com/datastream/docs/configure-self-managed-mysql"
+
+- id: ingest-services-023
+  domain: ingest
+  services: [dataform, bigquery]
+  type: single
+  question: |
+    ある音楽配信サービスは、Dataform を使い、再生ログのテーブル（日付でパーティション分割され、毎日数十億行が追加される）から、ユーザーごと・日ごとの再生回数の集計テーブルを作成しています。現在は集計テーブルの type を table にしており、実行のたびに全期間を再計算しているため、費用と時間がかかっています。
+
+    再生ログは最大3日遅れて届くことがあるため、直近3日分は毎回集計し直し、同じユーザー・同じ日の行は新しい結果で置き換えたいと考えています。どうすればよいですか？
+  choices:
+    a: "type を incremental にし、uniqueKey にユーザー ID と日付を指定して、直近3日分のログだけを読む"
+    b: "type を incremental にし、増分の実行では self() で調べた集計テーブルの最新の日付より新しいログだけを読む"
+    c: "type を view に変更し、集計テーブルが参照されるたびに再生ログ全体から集計を実行する"
+    d: "type を table のままにして、全期間を再計算する実行の頻度を毎日から毎週に減らす"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。増分テーブルで uniqueKey を指定すると、新しい結果が既存のテーブルに MERGE され、同じキーの行は置き換えられます。when(incremental(), ...) で増分の実行のときだけ直近3日分に絞って読むため、全期間を再計算する必要がありません。"
+    b: "uniqueKey がないと行は追加されるだけで、集計し直した結果で既存の行を置き換えられません。最新の日付より新しいログだけを読むと、遅れて届いたログも集計に反映されません。"
+    c: "集計テーブルが参照されるたびに全期間の集計が実行され、費用と時間の問題はむしろ大きくなります。"
+    d: "再計算の回数は減りますが、集計の結果が最大1週間古くなります。遅れて届くログへの対応にもなりません。"
+  explanation: |
+    Dataform の **増分テーブル（incremental）** は、初回は全件でテーブルを作成し、2回目以降は条件に合うデータだけを処理してテーブルに反映します。
+
+    | 設定 | 2回目以降の動き |
+    | --- | --- |
+    | uniqueKey なし | 新しい行を追加（INSERT）する |
+    | uniqueKey あり | 同じキーの行を新しい結果で置き換え、ない行は追加する（MERGE） |
+
+    ```sql
+    config {
+      type: "incremental",
+      uniqueKey: ["user_id", "play_date"],
+      bigquery: { partitionBy: "play_date" }
+    }
+
+    SELECT user_id, DATE(played_at) AS play_date, COUNT(*) AS plays
+    FROM ${ref("play_logs")}
+    ${when(incremental(),
+      `WHERE DATE(played_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`)}
+    GROUP BY user_id, play_date
+    ```
+
+    - when(incremental(), ...) の中身は、増分で実行するときだけ SQL に加わる
+    - self() で、作成するテーブル自身を参照できる（例：既存の最大の日時より新しい行だけを読む）
+    - パーティション分割したテーブルでは、updatePartitionFilter で MERGE の対象のパーティションを絞ると、読み取る量を減らせる
+  references:
+    - title: "テーブルを作成する"
+      url: "https://docs.cloud.google.com/dataform/docs/create-tables"
+
+- id: ingest-services-024
+  domain: ingest
+  services: [dataform, bigquery]
+  type: multiple
+  question: |
+    ある人材サービス会社は、BigQuery で ELT を行っています。LOAD DATA で生データを読み込んだ後、数十本の SQL スクリプトで加工していますが、実行順序をスクリプトのファイル名の番号で管理しているため、テーブルを追加すると順序が崩れることがあります。また、応募者 ID が空の行や重複した行に、レポートを公開した後で気付くことがあります。
+
+    これらの SQL を Dataform に移行し、依存関係に沿った順序で自動的に実行し、データの品質の問題を実行時に検知したいと考えています。どの対応を組み合わせるべきですか？
+  choices:
+    a: "SQLX ファイルで上流のテーブルを ref 関数で参照し、依存関係を Dataform に解決させる"
+    b: "テーブルの config ブロックに、応募者 ID の nonNull と uniqueKey のアサーションを定義する"
+    c: "テーブルを完全修飾名で直接参照し、実行順序はファイル名の番号で管理し続ける"
+    d: "BigQuery のスケジュールされたクエリを時間差で設定し、前の処理が終わる時刻を見込んで実行する"
+    e: "BigQuery のテーブルに応募者 ID の主キー制約を定義し、重複した行の挿入を防ぐ"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。ref 関数で参照すると、Dataform がテーブル間の依存関係を把握し、上流から順に実行します。テーブルを追加しても、順序を手で管理する必要はありません。"
+    b: "正解です。アサーションは、条件に反する行を探すクエリとして実行されます。空や重複の行が見つかるとアサーションが失敗し、実行時に問題を検知できます。"
+    c: "Dataform はファイル名の順で実行順序を決めません。完全修飾名で直接参照すると依存関係が認識されず、正しい順序で実行される保証がありません。"
+    d: "前の処理が予定より長引くと、終わる前に次の処理が始まります。依存関係に沿った実行にはなりません。"
+    e: "BigQuery の主キー制約は強制されない（NOT ENFORCED）ため、重複した行の挿入を防げません。空の値の検知にもなりません。"
+  explanation: |
+    Dataform は、BigQuery の中での SQL による変換（ELT の T）を管理するサービスです。SQLX ファイルにテーブルの定義と設定を書き、Git でバージョンを管理できます。
+
+    **依存関係の管理**
+
+    - ${ref("テーブル名")} で参照すると、Dataform がコンパイル時に依存関係のグラフを作り、上流から順に実行する
+    - ref で参照しない依存先は、config の dependencies で明示的に指定できる
+
+    **アサーション（データ品質のテスト）**
+
+    | 種類 | 内容 |
+    | --- | --- |
+    | nonNull | 指定した列に NULL がないこと |
+    | uniqueKey / uniqueKeys | 指定した列（列の組み合わせ）の値が重複しないこと |
+    | rowConditions | 各行が指定した SQL の条件を満たすこと |
+    | 手動のアサーション | 問題のある行を返す SQL を書く。1行でも返れば失敗 |
+
+    アサーションは条件に反する行を探すクエリとして実行され、その結果は BigQuery にビューとして作成されます。失敗はワークフローの実行結果に表示され、アラートで通知できます。
+  references:
+    - title: "データ品質をテストする"
+      url: "https://docs.cloud.google.com/dataform/docs/test-data"
+    - title: "依存関係を設定する"
+      url: "https://docs.cloud.google.com/dataform/docs/dependencies"
+
+- id: ingest-services-025
+  domain: ingest
+  services: [workflows, composer]
+  type: single
+  question: |
+    ある SaaS 企業では、顧客がデータファイルをアップロードした後に、次の処理を順に実行しています。
+
+    1. Cloud Run のサービスでファイルの内容を検証する
+    2. 検証に通ったら、BigQuery の読み込みジョブを実行して完了を待つ
+    3. 結果に応じて、外部の SaaS の API に HTTP で完了を通知する
+
+    処理は1日に数十回、1回あたり数分で終わります。現在は VM 上のスクリプトで実行していますが、サーバーの管理をやめたいと考えています。ステップごとの条件分岐と再試行を定義でき、処理を実行していない時間にはほとんど費用がかからない方法が求められています。
+
+    どのサービスを使うべきですか？
+  choices:
+    a: "Workflows でステップを定義し、コネクタと HTTP の呼び出しで各サービスを順に実行する"
+    b: "Cloud Composer の環境を作成し、各処理を Airflow のタスクとして DAG に定義する"
+    c: "Cloud Scheduler で各処理のジョブを作成し、前の処理が終わる時間を見込んで起動する"
+    d: "Dataflow のバッチ パイプラインを作成し、パイプラインの中から各サービスの API を順に呼び出す"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Workflows はサーバーレスのオーケストレーション サービスで、ステップの順序、条件分岐、再試行を定義できます。料金は実行したステップの数に応じてかかるため、処理していない時間の費用はほとんどかかりません。"
+    b: "条件分岐や再試行は定義できますが、Cloud Composer の環境は常に稼働しており、処理がない時間にも費用がかかります。数ステップの処理のためには過剰です。"
+    c: "ステップ間の依存関係や条件分岐を定義できません。前の処理が長引くと、終わる前に次の処理が始まります。"
+    d: "Dataflow はデータを並列に処理するためのサービスで、API の呼び出しを順に制御する用途には向きません。"
+  explanation: |
+    オーケストレーションの手段は、処理の複雑さと実行のきっかけで選びます。
+
+    | サービス | 特徴 | 向いている用途 |
+    | --- | --- | --- |
+    | Workflows | サーバーレス。ステップを YAML か JSON で定義し、料金は実行したステップ数に応じる | Google Cloud のサービスや HTTP API を順に呼ぶ、比較的シンプルな処理 |
+    | Cloud Composer | Apache Airflow のマネージド サービス。DAG を Python で定義する | 多数のジョブの複雑な依存関係、バックフィル、豊富なオペレーターの利用 |
+    | Cloud Scheduler | cron 形式のスケジュールで、HTTP や Pub/Sub などの1つのターゲットを起動する | 決まった時刻に1つの処理を起動する |
+    | Eventarc | ファイルの到着などのイベントで、Cloud Run や Workflows を起動する | イベント駆動の処理 |
+
+    Workflows の **コネクタ** を使うと、BigQuery のジョブのような時間のかかる処理も、完了を待ってから次のステップに進めます。ファイルのアップロードを Eventarc で受け取って、Workflows の実行を開始することもできます。
+  references:
+    - title: "Workflows の概要"
+      url: "https://docs.cloud.google.com/workflows/docs/overview"
+
+- id: ingest-services-026
+  domain: ingest
+  services: [composer, workflows, dataproc]
+  type: single
+  question: |
+    ある大手小売企業は、オンプレミスの Apache Airflow で数百の DAG を運用しています。DAG は Python で書かれ、Dataproc、BigQuery、社外の SFTP サーバー、社内のデータベースなどにまたがる複雑な依存関係を持っています。過去の日付を指定した再実行（バックフィル）も頻繁に行います。Google Cloud に移行するにあたり、Airflow のスケジューラやワーカーの保守をやめたいと考えています。既存の DAG はできるだけそのまま使いたいです。
+
+    どうすればよいですか？
+  choices:
+    a: "Cloud Composer 3 の環境を作成し、既存の DAG を環境のバケットの dags フォルダに置く"
+    b: "Workflows で各 DAG を YAML のワークフローに書き直し、Cloud Scheduler から起動する"
+    c: "GKE のクラスタに Apache Airflow を自分でデプロイし、既存の DAG をそのまま移す"
+    d: "Cloud Scheduler で DAG のタスクごとにジョブを作成し、それぞれ決まった時刻に起動する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。Cloud Composer は Apache Airflow のマネージド サービスで、既存の DAG をほぼそのまま使えます。スケジューラやワーカーなどの基盤は Google Cloud が管理します。"
+    b: "数百の DAG を書き直す必要があり、既存の DAG をそのまま使うという要件に反します。Airflow のバックフィルのような機能もありません。"
+    c: "DAG はそのまま使えますが、Airflow とクラスタの保守を自分で行う必要があり、要件に反します。"
+    d: "タスク間の依存関係を表現できず、バックフィルもできません。DAG の書き直しも必要です。"
+  explanation: |
+    **Cloud Composer** は、Apache Airflow のフルマネージド サービスです。
+
+    - DAG は Python で書き、環境の Cloud Storage バケットの dags フォルダに置くと読み込まれる
+    - BigQuery、Dataproc、Dataflow などの Google Cloud のサービスや、外部システム向けのオペレーターを使える
+    - 依存関係、再試行、バックフィル、監視の画面など、Airflow の機能をそのまま使える
+    - 新しく作成する環境には Cloud Composer 3 を使う（Cloud Composer 1 は廃止されている）
+
+    | 要件 | 選ぶサービス |
+    | --- | --- |
+    | 既存の Airflow の DAG を使い続けたい、複雑な依存関係やバックフィルが必要 | Cloud Composer |
+    | 数ステップの API 呼び出しを、サーバーレスで安く実行したい | Workflows |
+    | 決まった時刻に1つの処理を起動するだけ | Cloud Scheduler |
+  references:
+    - title: "Cloud Composer の概要"
+      url: "https://docs.cloud.google.com/composer/docs/composer-3/composer-overview"
+
+- id: ingest-services-027
+  domain: ingest
+  services: [cloud-storage, bigquery, composer]
+  type: single
+  question: |
+    ある建設会社では、各現場の担当者が点検結果の CSV ファイルを、Cloud Storage のバケットに不定期にアップロードします。アップロードは1日に数回から数百回で、時刻も決まっていません。ファイルが置かれたら、できるだけすぐに内容を検証して BigQuery に読み込みたいと考えています。1件の処理は数十秒で終わります。定期的にバケットを確認する処理や、常に稼働するサーバーは持ちたくありません。
+
+    どうすればよいですか？
+  choices:
+    a: "オブジェクトのファイナライズ イベントを Eventarc で受け取り、Cloud Run functions の関数を起動する"
+    b: "Cloud Scheduler で 5 分ごとに Cloud Run のジョブを起動し、新しいファイルを探して処理する"
+    c: "Cloud Composer の DAG で Cloud Storage のセンサーを使い、ファイルの到着を待ってから処理する"
+    d: "Compute Engine の VM でバケットを監視するスクリプトを常に動かし、新しいファイルを処理する"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。ファイルの作成が完了するとイベントが発生し、Eventarc がすぐに関数を起動します。処理がない時間にはリソースを使わず、定期的な確認も不要です。"
+    b: "最大で実行間隔の分だけ処理が遅れます。定期的にバケットを確認する処理を持ちたくないという要件にも反します。"
+    c: "センサーは定期的にファイルの有無を確認する仕組みで、Cloud Composer の環境も常に稼働させる必要があります。要件に反します。"
+    d: "常に稼働するサーバーが必要になり、要件に反します。"
+  explanation: |
+    ファイルの到着などをきっかけに処理を始める **イベント駆動** の構成では、Eventarc と Cloud Run functions（旧称 Cloud Functions）を組み合わせます。
+
+    1. Cloud Storage にオブジェクトが作成される（イベントの種類は google.cloud.storage.object.v1.finalized）
+    2. Eventarc がイベントを受け取り、関数を起動する
+    3. 関数がファイルを検証し、BigQuery の読み込みジョブを実行する
+
+    設計のポイント:
+
+    - イベントは重複して届くことがあるため、同じファイルを2回処理しても結果が変わらないようにする（べき等にする）
+    - 処理が複数のステップに分かれる場合は、イベントで Workflows を起動し、ステップの管理を任せる
+    - 処理に時間がかかる場合は、Cloud Run のサービスやジョブを使う
+
+    | きっかけ | 構成の例 |
+    | --- | --- |
+    | ファイルの到着などのイベント | Eventarc と Cloud Run functions または Workflows |
+    | 決まった時刻 | Cloud Scheduler、BigQuery Data Transfer Service |
+    | 複雑な依存関係を持つ定期的なジョブ群 | Cloud Composer |
+  diagram: |
+    flowchart TD
+      U["現場の担当者"] -->|CSV をアップロード| G["Cloud Storage"]
+      G -->|finalized イベント| E["Eventarc"]
+      E --> F["Cloud Run functions<br/>検証と読み込み"]
+      F --> B["BigQuery"]
+  references:
+    - title: "Eventarc の概要"
+      url: "https://docs.cloud.google.com/eventarc/docs/overview"
+
+- id: ingest-services-028
+  domain: ingest
+  services: [dataflow, pubsub, bigquery, iam]
+  type: multiple
+  question: |
+    あるエネルギー企業は、スマートメーターのデータを処理する Dataflow のストリーミング パイプライン（Java）と、関連する Pub/Sub のトピックや BigQuery のデータセットを、開発環境と本番環境で運用しています。現在は開発者が手元の PC から gcloud コマンドでデプロイしており、開発と本番で設定が食い違う問題が起きています。
+
+    次の要件を満たす CI/CD の仕組みを作りたいと考えています。
+
+    - Git のリポジトリへの変更をきっかけに、自動でビルドとテストを行う
+    - 開発環境で検証したものと同じ成果物を本番環境にデプロイする
+    - インフラの設定を環境間でそろえ、環境どうしは分離する
+
+    どの対応を組み合わせるべきですか？
+  choices:
+    a: "Cloud Build のトリガーでコンテナ イメージをビルドして Artifact Registry に保存し、Flex テンプレートで同じイメージを開発と本番にデプロイする"
+    b: "トピックやデータセットを Terraform で定義し、開発と本番を別のプロジェクトにして、同じモジュールを環境ごとの変数で適用する"
+    c: "本番にデプロイするたびに main ブランチの最新のコードからビルドし直し、本番環境で直接動作を確かめる"
+    d: "開発と本番を1つのプロジェクトにまとめ、Terraform で作るリソースの名前の接頭辞で環境を区別する"
+    e: "開発者が手元の PC から本番にデプロイできるよう、開発者全員に本番プロジェクトの編集者ロールを付与し、手順書をそろえる"
+  answer: [a, b]
+  choiceNotes:
+    a: "正解です。Flex テンプレートではパイプラインをコンテナ イメージとしてまとめるため、同じイメージを開発と本番で使えます。Cloud Build のトリガーで、変更のたびにビルドとテストを自動で実行できます。"
+    b: "正解です。インフラをコードで定義し、同じモジュールを環境ごとの変数で適用すると、環境間の設定のずれを防げます。プロジェクトを分けることで、権限や割り当ても環境ごとに分離できます。"
+    c: "デプロイのたびにビルドし直すと、開発で検証したものと異なる成果物が本番に入る可能性があります。本番環境で直接テストするのも危険です。"
+    d: "1つのプロジェクトでは、権限、割り当て、障害の影響を環境ごとに分けられません。環境を分離するという要件に反します。"
+    e: "手順書をそろえても手作業のデプロイが続き、設定の食い違いは解消しません。最小権限の原則にも反します。"
+  explanation: |
+    データ パイプラインの CI/CD では、**ビルドした成果物を固定し、同じものを環境間で昇格させる** ことと、**インフラをコードで管理する** ことが基本です。
+
+    | 要素 | 使うもの | 役割 |
+    | --- | --- | --- |
+    | ソース管理 | Git のリポジトリ | 変更の履歴とレビュー |
+    | ビルドとテスト | Cloud Build | 変更をきっかけに、テスト、イメージのビルド、デプロイを実行する |
+    | 成果物の保存 | Artifact Registry | パイプラインのコンテナ イメージをバージョンごとに保存する |
+    | パイプラインの配布 | Dataflow Flex テンプレート | コンテナ イメージと、起動時のパラメータを定義したテンプレート ファイルでパイプラインを起動する |
+    | インフラ | Terraform | Pub/Sub や BigQuery などのリソースを、環境ごとの変数で同じように作る |
+
+    Flex テンプレートは、gcloud dataflow flex-template build でテンプレート ファイル（Cloud Storage に保存）を作成し、gcloud dataflow flex-template run でジョブを起動します。プロジェクトやトピック名など、環境ごとに異なる値はパラメータで渡します。
+
+    開発と本番はプロジェクトを分け、本番へのデプロイは Cloud Build のサービス アカウントなど、決まった経路からだけ行えるようにします。
+  diagram: |
+    flowchart TD
+      G["Git リポジトリ"] -->|変更| CB["Cloud Build<br/>テストとビルド"]
+      CB --> AR["Artifact Registry<br/>コンテナ イメージ"]
+      CB --> TF["Terraform<br/>インフラの適用"]
+      AR --> DEV["開発プロジェクト<br/>Flex テンプレートで起動"]
+      DEV -->|検証後に同じイメージ| PRD["本番プロジェクト<br/>Flex テンプレートで起動"]
+      TF --> DEV
+      TF --> PRD
+  references:
+    - title: "Flex テンプレートをビルドして実行する"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/templates/using-flex-templates"
+    - title: "Google Cloud での Terraform"
+      url: "https://docs.cloud.google.com/docs/terraform"
+    - title: "Cloud Build の概要"
+      url: "https://docs.cloud.google.com/build/docs/overview"
+
+- id: ingest-services-029
+  domain: ingest
+  services: [dataform, bigquery, composer, workflows]
+  type: single
+  question: |
+    ある出版社は、Dataform のリポジトリを Git のリポジトリと連携させ、BigQuery での ELT を開発しています。開発者は自分の開発ワークスペースで SQLX を編集し、開発用のプロジェクトに出力して確認しています。本番では、main ブランチのコードを本番用のプロジェクトに出力し、毎朝 5 時に実行したいと考えています。
+
+    SQLX のコードは環境間で共通にし、出力先のプロジェクトだけを環境ごとに切り替えたいと考えています。手作業での実行もなくしたいです。どうすればよいですか？
+  choices:
+    a: "main ブランチを対象に、出力先を本番用のプロジェクトにするリリース構成を作成し、そのコンパイル結果を毎朝実行するワークフロー構成を作成する"
+    b: "本番用に SQLX ファイルを別のディレクトリに複製し、出力先のプロジェクト名を本番用に書き換えて管理する"
+    c: "開発者が毎朝、自分の開発ワークスペースから出力先に本番用のプロジェクトを指定して、手動で実行する"
+    d: "workflow_settings.yaml の既定のプロジェクトを本番用に書き換えたブランチを作り、デプロイのたびに main ブランチとマージする"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。リリース構成では、対象のブランチやコミットと、出力先のプロジェクトなどのコンパイルのオーバーライドを指定できます。ワークフロー構成で、そのコンパイル結果をスケジュールどおりに実行できます。"
+    b: "同じ SQL を2か所で管理することになり、修正の反映漏れが起きやすくなります。コードを環境間で共通にするという要件に反します。"
+    c: "毎朝の手作業が残り、要件に反します。開発ワークスペースのコードが main ブランチと一致するとも限りません。"
+    d: "ブランチの管理とマージの手間が増え、設定の誤りも起きやすくなります。リリース構成のオーバーライドを使えば不要です。"
+  explanation: |
+    Dataform では、同じコードを環境ごとに異なる設定でコンパイルし、実行できます。
+
+    | 仕組み | 用途 | 主な設定 |
+    | --- | --- | --- |
+    | workflow_settings.yaml | リポジトリの既定の設定 | 既定のプロジェクト、データセット、コンパイル変数 |
+    | ワークスペースのコンパイルのオーバーライド | 開発ワークスペースでの実行 | 出力先のプロジェクト、テーブル名の接頭辞、スキーマ名の接尾辞 |
+    | リリース構成 | 本番やステージングのコンパイル | 対象の Git のブランチやコミット、プロジェクトなどのオーバーライド、コンパイル変数、コンパイルの頻度 |
+    | ワークフロー構成 | リリース構成のコンパイル結果のスケジュール実行 | 実行の頻度、実行する対象、使うサービス アカウント |
+
+    開発者はワークスペースで開発用のプロジェクトに出力し、レビューを経て main ブランチにマージします。本番はリリース構成とワークフロー構成で自動的に実行されるため、本番のプロジェクトに手作業で書き込む人をなくせます。
+
+    ほかのサービスの処理と順序を合わせたい場合は、Cloud Composer や Workflows から Dataform の API を呼び出して実行することもできます。
+  references:
+    - title: "リリース構成"
+      url: "https://docs.cloud.google.com/dataform/docs/release-configurations"
+    - title: "コンパイルを構成する"
+      url: "https://docs.cloud.google.com/dataform/docs/configure-compilation"
