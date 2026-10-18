@@ -45,4 +45,15 @@ describe('問題データ', () => {
   it('本番と同じく、複数選択の問題を含む', () => {
     expect(all.some((q) => q.type === 'multiple')).toBe(true);
   });
+
+  // 4択で長さに偏りがなければ、正解が最も長くなるのは約25%。
+  // 大きく超えると「一番長い選択肢を選ぶ」だけで正解できてしまう。
+  it('単一選択で、正解が最も長い選択肢になっている問題は35%以下', () => {
+    const single = all.filter((q) => q.type === 'single');
+    const longest = single.filter((q) => {
+      const max = Math.max(...q.choices.map((c) => c.text.length));
+      return q.choices.find((c) => c.key === q.answer[0])?.text.length === max;
+    });
+    expect(longest.length / single.length).toBeLessThanOrEqual(0.35);
+  });
 });
