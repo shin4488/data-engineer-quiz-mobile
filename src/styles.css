@@ -657,15 +657,24 @@ textarea {
   white-space: nowrap;
 }
 
-.diagram {
+.diagram-figure {
   margin: 12px 0;
+}
+
+.diagram {
   overflow-x: auto;
   text-align: center;
+  -webkit-overflow-scrolling: touch;
 }
 
 .diagram svg {
   max-width: 100%;
   height: auto;
+}
+
+.diagram-figure .hint {
+  text-align: center;
+  margin: 4px 0 0;
 }
 
 .diagram-fallback {
