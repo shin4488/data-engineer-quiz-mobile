@@ -37,6 +37,31 @@ export function matchesFilter(q: Question, filter: QuestionFilter, progress: Pro
   return true;
 }
 
+/**
+ * 分野・サービスの選択肢ごとに、いまの条件で出題の対象になる問題数を数える。
+ * 同じ種類の選択は「または」で足し合わさるため、その種類の選択だけを外した条件で数える。
+ * 例: 分野「保存」を選んでいても、分野「分析」の数は、ほかの条件に合う分析の問題数になる。
+ */
+export function countByCategory(
+  questions: readonly Question[],
+  filter: QuestionFilter,
+  progress: Progress,
+): { domains: Map<DomainId, number>; services: Map<ServiceId, number> } {
+  const domains = new Map<DomainId, number>();
+  const services = new Map<ServiceId, number>();
+  const withoutDomains = { ...filter, domains: [] };
+  const withoutServices = { ...filter, services: [] };
+  for (const q of questions) {
+    if (matchesFilter(q, withoutDomains, progress)) {
+      domains.set(q.domain, (domains.get(q.domain) ?? 0) + 1);
+    }
+    if (matchesFilter(q, withoutServices, progress)) {
+      for (const s of q.services) services.set(s, (services.get(s) ?? 0) + 1);
+    }
+  }
+  return { domains, services };
+}
+
 export function filterQuestions(
   questions: readonly Question[],
   filter: QuestionFilter,

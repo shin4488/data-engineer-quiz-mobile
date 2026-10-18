@@ -82,6 +82,20 @@ describe('練習モード', () => {
 
     fireEvent.click(screen.getByRole('checkbox', { name: /見直しの印を付けた問題だけ/ }));
     expect(screen.getByText(/条件に合う問題/).textContent).toContain('1問');
+
+    // 分野の数字も、見直しの印を付けた1問だけを数える
+    const domainCounts = [
+      'データ処理システムの設計',
+      'データの保存',
+      '分析用データを準備して使用する',
+    ].map((label) =>
+      Number(
+        screen
+          .getByRole('button', { name: new RegExp(`^${label}`) })
+          .textContent?.match(/\d+$/)?.[0],
+      ),
+    );
+    expect(domainCounts.reduce((a, b) => a + b, 0)).toBe(1);
   });
 
   it('中断した練習は、アプリを開き直しても続きから再開できる', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeQuestion } from '../test-helpers.ts';
-import { EMPTY_FILTER, filterQuestions } from './filter.ts';
+import { countByCategory, EMPTY_FILTER, filterQuestions } from './filter.ts';
 import type { Progress } from './progress.ts';
 
 const questions = [
@@ -58,5 +58,43 @@ describe('filterQuestions', () => {
 
   it('種類の違う条件は、すべてを満たす問題だけを対象にする', () => {
     expect(ids({ domains: ['design', 'store'], markedOnly: true, minWrong: 1 })).toEqual(['q2']);
+  });
+});
+
+describe('countByCategory', () => {
+  const counts = (filter: Partial<typeof EMPTY_FILTER>) => {
+    const c = countByCategory(questions, { ...EMPTY_FILTER, ...filter }, progress);
+    return { domains: Object.fromEntries(c.domains), services: Object.fromEntries(c.services) };
+  };
+
+  it('条件がなければ、分野・サービスごとの全問題数を数える', () => {
+    expect(counts({})).toEqual({
+      domains: { design: 2, store: 1, analyze: 1 },
+      services: { bigquery: 2, dataflow: 1, pubsub: 1, bigtable: 1, looker: 1 },
+    });
+  });
+
+  it('見直しの印や間違えた回数の条件に合う問題だけを数える', () => {
+    expect(counts({ markedOnly: true })).toEqual({
+      domains: { design: 1, analyze: 1 },
+      services: { dataflow: 1, pubsub: 1, looker: 1 },
+    });
+    expect(counts({ minWrong: 2 }).domains).toEqual({ store: 1 });
+  });
+
+  it('分野を選ぶと、サービスの数はその分野の問題だけになる', () => {
+    expect(counts({ domains: ['design'] }).services).toEqual({
+      bigquery: 1,
+      dataflow: 1,
+      pubsub: 1,
+    });
+  });
+
+  it('選んだ分野以外の分野の数は、選び足したときに増える問題数のまま表示する', () => {
+    expect(counts({ domains: ['design'] }).domains).toEqual({ design: 2, store: 1, analyze: 1 });
+  });
+
+  it('サービスを選ぶと、分野の数はそのサービスに関係する問題だけになる', () => {
+    expect(counts({ services: ['bigquery'] }).domains).toEqual({ design: 1, store: 1 });
   });
 });

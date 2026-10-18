@@ -269,6 +269,11 @@ h4 {
   font-weight: 600;
 }
 
+.filter-chip.is-empty {
+  color: var(--muted);
+  border-style: dashed;
+}
+
 .chip-count {
   font-size: 0.75rem;
   color: var(--muted);

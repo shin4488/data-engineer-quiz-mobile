@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { formatDuration } from '../components/ui.tsx';
 import { DOMAINS, type DomainId, SERVICES, type ServiceId } from '../data/categories.ts';
 import { QUESTIONS } from '../data/questions.ts';
-import { EMPTY_FILTER, filterQuestions, type QuestionFilter } from '../lib/filter.ts';
+import {
+  countByCategory,
+  EMPTY_FILTER,
+  filterQuestions,
+  type QuestionFilter,
+} from '../lib/filter.ts';
 import type { Progress } from '../lib/progress.ts';
 import {
   COUNT_OPTIONS,
@@ -17,13 +22,9 @@ import type { Prefs } from '../lib/storage.ts';
 const toggle = <T,>(list: T[], item: T) =>
   list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
 
-const countByDomain = new Map<string, number>();
-const countByService = new Map<string, number>();
-for (const q of QUESTIONS) {
-  countByDomain.set(q.domain, (countByDomain.get(q.domain) ?? 0) + 1);
-  for (const s of q.services) countByService.set(s, (countByService.get(s) ?? 0) + 1);
-}
-const AVAILABLE_SERVICES = SERVICES.filter((s) => (countByService.get(s.id) ?? 0) > 0);
+// 問題が1問もないサービスは選択肢に出さない
+const SERVICES_WITH_QUESTIONS = new Set(QUESTIONS.flatMap((q) => q.services));
+const AVAILABLE_SERVICES = SERVICES.filter((s) => SERVICES_WITH_QUESTIONS.has(s.id));
 
 interface Props {
   progress: Progress;
@@ -144,6 +145,10 @@ function PracticeSetup({
     () => filterQuestions(QUESTIONS, filter, progress).length,
     [filter, progress],
   );
+  const categoryCounts = useMemo(
+    () => countByCategory(QUESTIONS, filter, progress),
+    [filter, progress],
+  );
   const toAsk = count === 'all' ? matched : Math.min(count, matched);
   const maxWrong = Math.max(0, ...Object.values(progress.stats).map((s) => s.wrong));
   const wrongOptions = Array.from({ length: Math.max(5, maxWrong) }, (_, i) => i + 1);
@@ -153,13 +158,15 @@ function PracticeSetup({
     <>
       <section className="card">
         <h2>分野</h2>
-        <p className="hint">選ばなければ全分野から出題します。</p>
+        <p className="hint">
+          選ばなければ全分野から出題します。数字は、ほかの絞り込み条件で出題される問題数です。
+        </p>
         <div className="chip-group">
           {DOMAINS.map((d) => (
             <FilterChip
               key={d.id}
               label={d.label}
-              count={countByDomain.get(d.id) ?? 0}
+              count={categoryCounts.domains.get(d.id) ?? 0}
               selected={filter.domains.includes(d.id)}
               onClick={() => set({ domains: toggle<DomainId>(filter.domains, d.id) })}
             />
@@ -177,7 +184,7 @@ function PracticeSetup({
               <FilterChip
                 key={s.id}
                 label={s.label}
-                count={countByService.get(s.id) ?? 0}
+                count={categoryCounts.services.get(s.id) ?? 0}
                 selected={filter.services.includes(s.id)}
                 onClick={() => set({ services: toggle<ServiceId>(filter.services, s.id) })}
               />
@@ -285,7 +292,7 @@ function FilterChip({
   return (
     <button
       type="button"
-      className={`filter-chip ${selected ? 'is-selected' : ''}`}
+      className={`filter-chip ${selected ? 'is-selected' : count === 0 ? 'is-empty' : ''}`}
       aria-pressed={selected}
       onClick={onClick}
     >
