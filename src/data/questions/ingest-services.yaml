@@ -279,7 +279,7 @@
     - 受け取ったメッセージを、既存のバケットにファイルとして書き込む
     - 出力形式はテキストまたは Avro。新しいファイルを作るまでの時間やファイルのサイズで、まとめ方を調整できる
     - 書き込めないメッセージは、デッドレター トピックに転送できる
-    - 軽い加工なら単一メッセージ変換（SMT）を付けられる。複雑な変換や集計には Dataflow を使う
+    - 軽い加工なら、トピックやサブスクリプションに単一メッセージ変換（SMT）を設定する方法もある。複雑な変換や集計には Dataflow を使う
   references:
     - title: "Cloud Storage サブスクリプション"
       url: "https://docs.cloud.google.com/pubsub/docs/cloudstorage"
@@ -435,7 +435,7 @@
   choiceNotes:
     a: "正解です。初期化アクションは、クラスタの作成時に全ノードで実行されるスクリプトで、オートスケーリングで追加されたノードでも実行されます。スクリプトを更新すれば、翌朝に作成するクラスタから新しいライブラリが入ります。"
     b: "全ノードに同じものを入れられますが、ライブラリを更新するたびにイメージを作り直す必要があり、要件に反します。"
-    c: "手作業のため漏れが起きやすく、オートスケーリングで追加されたノードには自動で入りません。"
+    c: "クラスタを作成するたびに手作業が必要で、漏れも起きやすくなります。オートスケーリングで追加されたノードには自動で入りません。"
     d: "ジョブの先頭の処理はドライバでしか実行されないため、ワーカーノードにはライブラリが入りません。監視エージェントもインストールできません。"
   explanation: |
     Dataproc のクラスタのノードにソフトウェアを追加する方法は、主に2つあります。
@@ -459,7 +459,7 @@
   services: [dataproc]
   type: single
   question: |
-    あるデジタル広告の企業は、常時稼働する Dataproc のクラスタで、広告配信ログを集計する Spark のバッチジョブを実行しています。ジョブの数は時間帯によって大きく変わり、ピーク時にはリソースが足りず、夜間はノードの大半が遊んでいます。入出力のデータはすべて Cloud Storage にあります。
+    あるデジタル広告の企業は、常時稼働する Dataproc のクラスタで、広告配信ログを集計する Spark のバッチジョブを実行しています。ジョブの数は時間帯によって大きく変わり、ピーク時にはリソースが足りず、夜間は大半のノードが使われていません。入出力のデータはすべて Cloud Storage にあります。
 
     負荷に応じてノード数を自動で増減させたいと考えています。ただし、ノードを減らすときに、実行中のタスクが失敗したり HDFS のデータが失われたりしないようにする必要があります。
 
@@ -474,7 +474,7 @@
     a: "正解です。セカンダリ ワーカーは HDFS のデータを持たないため、増減させても HDFS に影響しません。グレースフル デコミッションのタイムアウトを設定すると、削除するノードで実行中の処理が終わるのを待ってから削除されます。"
     b: "プライマリ ワーカーは HDFS のデータを持つため、大きく減らすとデータの移動や消失の危険があります。グレースフル デコミッションを無効にすると、実行中のタスクも失敗します。"
     c: "時間帯で決めた台数に変えるだけで、実際の負荷には追従しません。負荷に応じて自動で増減させたいという要件を満たしません。"
-    d: "ノード数は変わらず、夜間に遊んでいるリソースの問題も解決しません。負荷に応じて自動で増減させたいという要件を満たしません。"
+    d: "ノード数は変わらず、夜間に使われないリソースの費用もかかり続けます。負荷に応じて自動で増減させたいという要件を満たしません。"
   explanation: |
     Dataproc の **オートスケーリング ポリシー** は、YARN のメモリの使用状況をもとに、クラスタのワーカー数を自動で増減させます。
 
@@ -841,7 +841,7 @@
     | 方法 | 向いている場合 |
     | --- | --- |
     | BigQuery Data Transfer Service | 定期的な読み込みだけを、コードなしで行う |
-    | Eventarc と Cloud Run functions | ファイルが届いたらすぐに処理する |
+    | Eventarc と Cloud Run functions | ファイルが届いたらすぐに、検証などの独自の処理をする |
     | Cloud Composer | 読み込みの前後に、複数のサービスの処理が連なる |
   references:
     - title: "Cloud Storage データを BigQuery に読み込む"
@@ -951,7 +951,7 @@
 
     再生ログは最大3日遅れて届くことがあるため、直近3日分は毎回集計し直し、同じユーザー・同じ日の行は新しい結果で置き換えたいと考えています。どうすればよいですか？
   choices:
-    a: "type を incremental にし、uniqueKey にユーザー ID と日付を指定して、直近3日分のログだけを読む"
+    a: "type を incremental にし、uniqueKey にユーザー ID と日付を指定して、増分の実行では直近3日分を読む"
     b: "type を incremental にし、増分の実行では self() で調べた集計テーブルの最新の日付より新しいログだけを読む"
     c: "type を view に変更し、集計テーブルが参照されるたびに再生ログ全体から集計を実行する"
     d: "type を table のままにして、全期間を再計算する実行の頻度を毎日から毎週に減らす"
@@ -1066,7 +1066,7 @@
     | サービス | 特徴 | 向いている用途 |
     | --- | --- | --- |
     | Workflows | サーバーレス。ステップを YAML か JSON で定義し、料金は実行したステップ数に応じる | Google Cloud のサービスや HTTP API を順に呼ぶ、比較的シンプルな処理 |
-    | Cloud Composer | Apache Airflow のマネージド サービス。DAG を Python で定義する | 多数のジョブの複雑な依存関係、バックフィル、豊富なオペレーターの利用 |
+    | Cloud Composer | Apache Airflow のマネージド サービス（新しい名称は Managed Service for Apache Airflow）。DAG を Python で定義する | 多数のジョブの複雑な依存関係、バックフィル、豊富なオペレーターの利用 |
     | Cloud Scheduler | cron 形式のスケジュールで、HTTP や Pub/Sub などの1つのターゲットを起動する | 決まった時刻に1つの処理を起動する |
     | Eventarc | ファイルの到着などのイベントで、Cloud Run や Workflows を起動する | イベント駆動の処理 |
 
@@ -1102,14 +1102,18 @@
     - 依存関係、再試行、バックフィル、監視の画面など、Airflow の機能をそのまま使える
     - 新しく作成する環境には Cloud Composer 3 を使う（Cloud Composer 1 は廃止されている）
 
+    なお、最近のドキュメントでは、Cloud Composer は Managed Service for Apache Airflow（Cloud Composer 3 は Managed Airflow (Gen 3)）という名称になっています。試験ガイドでは Cloud Composer の名称が使われています。
+
     | 要件 | 選ぶサービス |
     | --- | --- |
     | 既存の Airflow の DAG を使い続けたい、複雑な依存関係やバックフィルが必要 | Cloud Composer |
     | 数ステップの API 呼び出しを、サーバーレスで安く実行したい | Workflows |
     | 決まった時刻に1つの処理を起動するだけ | Cloud Scheduler |
   references:
-    - title: "Cloud Composer の概要"
+    - title: "Managed Airflow の概要"
       url: "https://docs.cloud.google.com/composer/docs/composer-3/composer-overview"
+    - title: "DAG を追加・更新する"
+      url: "https://docs.cloud.google.com/composer/docs/composer-3/manage-dags"
 
 - id: ingest-services-027
   domain: ingest
@@ -1120,7 +1124,7 @@
 
     どうすればよいですか？
   choices:
-    a: "オブジェクトのファイナライズ イベントを Eventarc で受け取り、Cloud Run functions の関数を起動する"
+    a: "オブジェクトのファイナライズ イベントを Eventarc で受け取り、Cloud Run functions を起動する"
     b: "Cloud Scheduler で 5 分ごとに Cloud Run のジョブを起動し、新しいファイルを探して処理する"
     c: "Cloud Composer の DAG で Cloud Storage のセンサーを使い、ファイルの到着を待ってから処理する"
     d: "Compute Engine の VM でバケットを監視するスクリプトを常に動かし、新しいファイルを処理する"
@@ -1155,8 +1159,10 @@
       E --> F["Cloud Run functions<br/>検証と読み込み"]
       F --> B["BigQuery"]
   references:
-    - title: "Eventarc の概要"
-      url: "https://docs.cloud.google.com/eventarc/docs/overview"
+    - title: "Cloud Storage イベントからトリガーを作成する"
+      url: "https://docs.cloud.google.com/run/docs/triggering/storage-triggers"
+    - title: "Eventarc Standard の概要"
+      url: "https://docs.cloud.google.com/eventarc/standard/docs/overview"
 
 - id: ingest-services-028
   domain: ingest
@@ -1249,7 +1255,7 @@
 
     ほかのサービスの処理と順序を合わせたい場合は、Cloud Composer や Workflows から Dataform の API を呼び出して実行することもできます。
   references:
-    - title: "リリース構成"
-      url: "https://docs.cloud.google.com/dataform/docs/release-configurations"
     - title: "コンパイルを構成する"
-      url: "https://docs.cloud.google.com/dataform/docs/configure-compilation"
+      url: "https://docs.cloud.google.com/dataform/docs/release-configurations"
+    - title: "実行をスケジュールする"
+      url: "https://docs.cloud.google.com/dataform/docs/schedule-runs"
