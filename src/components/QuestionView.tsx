@@ -1,10 +1,10 @@
+import { useEffect, useState } from 'react';
 import { domainOf, serviceLabel } from '../data/categories.ts';
 import type { Question } from '../data/types.ts';
+import { CHOICE_LETTERS, formatQuestionForCopy } from '../lib/copy.ts';
 import type { QuestionStat } from '../lib/progress.ts';
 import { Diagram } from './Diagram.tsx';
 import { Markdown } from './Markdown.tsx';
-
-const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 /** 公式ドキュメントを日本語で表示する。日本語版がないページは英語で表示される。 */
 export function withJapanese(url: string): string {
@@ -41,6 +41,7 @@ export function QuestionView({ question, order, selected, onSelect, revealed }: 
             {serviceLabel(s)}
           </span>
         ))}
+        <CopyButton text={formatQuestionForCopy(question, order)} />
       </div>
       {question.type === 'multiple' && (
         <p className="multi-hint">複数選択：{question.answer.length}つ選んでください</p>
@@ -70,7 +71,7 @@ export function QuestionView({ question, order, selected, onSelect, revealed }: 
                 disabled={revealed || !onSelect}
                 onClick={() => onSelect?.(nextSelection(question, selected, key))}
               >
-                <span className="choice-letter">{LETTERS[i]}</span>
+                <span className="choice-letter">{CHOICE_LETTERS[i]}</span>
                 <span className="choice-text">{choice.text}</span>
               </button>
               {revealed && (
@@ -109,5 +110,49 @@ export function Explanation({ question, stat }: { question: Question; stat?: Que
         </p>
       )}
     </section>
+  );
+}
+
+type CopyState = 'idle' | 'done' | 'failed';
+
+/** 問題文と選択肢をクリップボードにコピーする。結果は短い間だけボタンの表示で知らせる。 */
+function CopyButton({ text }: { text: string }) {
+  const [state, setState] = useState<CopyState>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const timer = setTimeout(() => setState('idle'), 1500);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState('done');
+    } catch {
+      setState('failed');
+    }
+  };
+  const label = {
+    idle: '問題と選択肢をコピー',
+    done: 'コピーしました',
+    failed: 'コピーできませんでした',
+  }[state];
+  return (
+    <button
+      type="button"
+      className={`copy-button ${state === 'done' ? 'is-done' : ''}`}
+      onClick={copy}
+    >
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        {state === 'done' ? (
+          <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.2" />
+        ) : (
+          <g fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="8" y="8" width="12" height="12" rx="2" />
+            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+          </g>
+        )}
+      </svg>
+      <span>{label}</span>
+    </button>
   );
 }
