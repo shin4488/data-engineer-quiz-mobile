@@ -19,7 +19,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(`${process.env.npm_package_version ?? 'dev'} (${buildDate})`),
   },
-  // 公開先のパス（GitHub Pages ではリポジトリ名）に依存しないよう、相対パスで出力する
+  // 公開先のパスに依存しないよう、相対パスで出力する
   base: './',
   plugins: [
     yaml(),
