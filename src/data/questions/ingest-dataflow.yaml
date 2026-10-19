@@ -931,42 +931,6 @@
     - title: "Flex テンプレートを構築して実行する"
       url: "https://docs.cloud.google.com/dataflow/docs/guides/templates/using-flex-templates"
 
-- id: ingest-dataflow-025
-  domain: ingest
-  services: [dataflow, bigquery]
-  type: single
-  question: |
-    ある決済サービス企業は、決済イベントを Pub/Sub から Dataflow で読み取り、BigQuery に書き込んでいます。現在は BigQueryIO の従来のストリーミング挿入（insertAll API）を使っています。書き込みのコストを下げたうえで、パイプラインの再試行によって同じ行が重複して書き込まれないようにしたいと考えています。
-
-    どうすればよいですか？
-  choices:
-    a: "BigQueryIO の書き込み方式を、Storage Write API の exactly-once 方式（STORAGE_WRITE_API）に変更する"
-    b: "BigQueryIO の書き込み方式を、Storage Write API の at-least-once 方式（STORAGE_API_AT_LEAST_ONCE）に変更する"
-    c: "BigQueryIO の書き込み方式をファイル読み込み（FILE_LOADS）に変更し、数秒ごとに読み込みジョブを実行する"
-    d: "従来のストリーミング挿入を続け、重複した行は BigQuery のスケジュールされたクエリで定期的に削除する"
-  answer: [a]
-  choiceNotes:
-    a: "正解です。Storage Write API は従来のストリーミング挿入より低コストで、exactly-once 方式ではストリームのオフセットを使って、再試行しても行が重複しないように書き込めます。"
-    b: "at-least-once 方式は、さらにレイテンシとコストを抑えられますが、再試行で行が重複する可能性があります。重複させないという要件に反します。"
-    c: "数秒ごとに読み込みジョブを実行すると、テーブルあたりの読み込みジョブの割り当て（クォータ）にすぐ達します。読み込みジョブはストリーミングの頻繁な書き込みには向きません。"
-    d: "従来のストリーミング挿入のコストは下がらず、重複を削除するクエリのコストと運用の手間も増えます。"
-  explanation: |
-    Dataflow から BigQuery への書き込み方式です。
-
-    | 方式 | 特徴 | 主な用途 |
-    | --- | --- | --- |
-    | Storage Write API（exactly-once） | 低コスト、重複なしで書き込める | ストリーミング・バッチの標準的な選択 |
-    | Storage Write API（at-least-once） | さらに低レイテンシ・低コスト、重複の可能性あり | 重複を許容できるストリーミング |
-    | ファイル読み込み（FILE_LOADS） | 読み込みジョブを使う | バッチ |
-    | 従来のストリーミング挿入（insertAll） | 以前からの方式 | 新規では Storage Write API を推奨 |
-
-    ストリーミングで exactly-once 方式を使う場合は、書き込みの頻度（triggering frequency）とストリーム数を指定するか、自動シャーディングを使います。
-  references:
-    - title: "Dataflow から BigQuery に書き込む"
-      url: "https://docs.cloud.google.com/dataflow/docs/guides/write-to-bigquery"
-    - title: "BigQuery Storage Write API の概要"
-      url: "https://docs.cloud.google.com/bigquery/docs/write-api"
-
 - id: ingest-dataflow-026
   domain: ingest
   services: [dataflow, kafka, networking, migration]
@@ -1092,3 +1056,47 @@
       url: "https://docs.cloud.google.com/dataflow/docs/machine-learning/ml-about"
     - title: "RunInference 変換のベスト プラクティス"
       url: "https://docs.cloud.google.com/dataflow/docs/machine-learning/runinference-best-practices"
+
+- id: ingest-dataflow-029
+  domain: ingest
+  services: [bigquery, dataflow, pubsub]
+  type: single
+  question: |
+    あるホームセンター チェーンは、全国の店舗と商品ごとの在庫数（約5,000万行）を BigQuery のテーブルで管理し、ダッシュボードで参照しています。在庫の変更（入荷・販売・取り扱い終了による削除）は Pub/Sub に届き、Dataflow のストリーミング パイプラインが処理しています。
+
+    現在は、変更イベントを別のテーブルに追記し、5分ごとのスケジュールされたクエリで MERGE 文を実行して在庫テーブルに反映しています。しかし、MERGE が在庫テーブルを繰り返し読み取るためコストがかさみ、実行が重なって失敗することもあります。ダッシュボードの在庫は、15分程度の遅れなら許容されます。
+
+    運用の手間とコストを抑えて在庫テーブルを最新に保つには、どうすればよいですか？
+  choices:
+    a: "主キーと max_staleness を設定したテーブルに、Storage Write API の CDC で UPSERT と DELETE を送る"
+    b: "変更イベントを日付でパーティション分割した履歴テーブルに追記し続け、店舗と商品ごとに最新の行だけを選ぶビューを、ダッシュボードから参照させる"
+    c: "Dataflow のパイプラインから変更イベントごとに UPDATE 文と DELETE 文を発行し、在庫テーブルの該当する行をその都度書き換える"
+    d: "以前のストリーミング API（insertAll）で insertId に店舗と商品の組み合わせを指定し、同じ組み合わせの行を常に最新の1行にまとめさせる"
+  answer: [a]
+  choiceNotes:
+    a: "正解です。主キーを定義したテーブルに、Storage Write API で変更の種類（UPSERT または DELETE）を付けて書き込むと、BigQuery がバックグラウンドで変更を反映します。max_staleness で許容する遅れを決めるので、MERGE のスケジュール管理が不要になります。"
+    b: "動きはしますが、履歴が増えるほど、ダッシュボードのクエリのたびに最新の行を選ぶ処理が重くなり、コストも増え続けます。削除も行の印で表す必要があります。"
+    c: "DML は1文ごとにテーブルの処理が走り、同じテーブルへの同時実行も制限されます。大量の変更を1件ずつ反映する用途には向きません。"
+    d: "insertId は、再試行で同じ行が二重に書き込まれるのを短時間だけベストエフォートで防ぐ仕組みです。既存の行の更新や削除はできません。"
+  explanation: |
+    BigQuery には、Storage Write API で届いた変更をテーブルに反映する **変更データ キャプチャ（CDC）** の機能があります。
+
+    | 項目 | 内容 |
+    | --- | --- |
+    | 変更の種類 | 行ごとに疑似列 `_CHANGE_TYPE` で **UPSERT** か **DELETE** を指定する |
+    | テーブル | **主キー**（`PRIMARY KEY ... NOT ENFORCED`）の定義が必須。主キーと同じ列でのクラスタリングが推奨される |
+    | 鮮度とコスト | `max_staleness` で許容する遅れを決める。BigQuery はその間隔の中で変更をまとめて反映し、クエリは反映済みの時点のデータを読む。間隔を長くするほど反映の処理が減り、コストを抑えられる |
+    | Dataflow から使う場合 | BigQueryIO の Storage Write API の **at-least-once** の書き込み方式を使う。主キー付きのテーブルは事前に作成しておく |
+
+    MERGE によるバッチ反映と比べると、スケジュールの管理や実行の重なりを気にする必要がなくなります。一方、SCD タイプ 2 のように変更の履歴を行として残したい場合は、追記と MERGE（またはタイムトラベル）を使います。
+  diagram: |
+    flowchart TD
+      P["Pub/Sub<br/>在庫の変更イベント"] --> D["Dataflow<br/>UPSERT / DELETE を付与"]
+      D -->|Storage Write API| T["在庫テーブル<br/>主キー・max_staleness"]
+      T -->|バックグラウンドで反映| T
+      T --> B["ダッシュボード"]
+  references:
+    - title: "変更データ キャプチャでテーブルの更新をストリーミングする"
+      url: "https://docs.cloud.google.com/bigquery/docs/change-data-capture"
+    - title: "Dataflow から BigQuery に書き込む"
+      url: "https://docs.cloud.google.com/dataflow/docs/guides/write-to-bigquery"
