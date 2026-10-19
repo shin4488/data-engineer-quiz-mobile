@@ -112,6 +112,26 @@ describe('練習モード', () => {
   });
 });
 
+describe('問題のコピー', () => {
+  it('ボタン1つで、画面に表示中の問題文と選択肢をコピーし、完了を知らせる', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<App />);
+    click('練習を始める');
+    const shown = screen
+      .getAllByRole('button', { name: /^[A-D]選択肢 / })
+      .map((b) => b.textContent);
+
+    fireEvent.click(screen.getByRole('button', { name: '問題と選択肢をコピー' }));
+    expect(await screen.findByRole('button', { name: 'コピーしました' })).toBeTruthy();
+
+    const text = writeText.mock.calls[0]?.[0] as string;
+    expect(text.startsWith(screen.getByText(/の問題文$/).textContent ?? '')).toBe(true);
+    // 画面と同じ順番・記号（A〜D）で選択肢が並ぶ
+    expect(text).toContain(shown.map((t) => `${t?.slice(0, 1)}. ${t?.slice(1)}`).join('\n'));
+  });
+});
+
 describe('模擬試験モード', () => {
   it('解説を出さずに回答を進め、採点すると結果を表示する', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);

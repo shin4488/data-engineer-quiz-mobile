@@ -406,6 +406,25 @@ textarea {
   color: var(--muted);
 }
 
+.copy-button {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.copy-button.is-done {
+  color: var(--correct);
+}
+
 .chip-domain {
   background: var(--primary-soft);
   color: var(--text);
