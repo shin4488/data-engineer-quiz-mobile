@@ -19,8 +19,8 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(`${process.env.npm_package_version ?? 'dev'} (${buildDate})`),
   },
-  // GitHub Pages のプロジェクトサイトは /<リポジトリ名>/ で配信される
-  base: '/data-engineer-quiz-mobile/',
+  // 公開先のパス（GitHub Pages ではリポジトリ名）に依存しないよう、相対パスで出力する
+  base: './',
   plugins: [
     yaml(),
     react(),
