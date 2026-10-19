@@ -976,3 +976,8 @@ textarea {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.segmented.small button {
+  padding: 0 2px;
+  white-space: nowrap;
+}

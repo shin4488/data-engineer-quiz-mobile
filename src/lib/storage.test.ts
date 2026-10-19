@@ -111,3 +111,20 @@ describe('addHistory', () => {
     expect(history.at(-1)?.finishedAt).toBe(2);
   });
 });
+
+describe('出題数の設定', () => {
+  it('選べる出題数（3問など）は、保存して次回もそのまま読み込む', () => {
+    const storage = new MemoryStorage();
+    saveData({ ...sample, prefs: { ...sample.prefs, count: 3 } }, storage);
+    expect(loadData(storage).prefs.count).toBe(3);
+  });
+
+  it('選べない出題数が保存されていたら、既定の出題数に戻す', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      'pde-quiz:v1',
+      JSON.stringify({ ...sample, prefs: { ...sample.prefs, count: 7 } }),
+    );
+    expect(loadData(storage).prefs.count).toBe(DEFAULT_DATA.prefs.count);
+  });
+});

@@ -10,7 +10,7 @@ export const EXAM_QUESTION_COUNT = 50;
 export const EXAM_DURATION_MS = 120 * 60 * 1000;
 export const PASS_RATE = 0.7;
 
-export const COUNT_OPTIONS = [5, 10, 20, 30, 50, 'all'] as const;
+export const COUNT_OPTIONS = [3, 5, 10, 20, 30, 50, 'all'] as const;
 export type CountOption = (typeof COUNT_OPTIONS)[number];
 
 export interface QuizSession {
