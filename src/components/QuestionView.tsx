@@ -131,12 +131,15 @@ function CopyButton({ text }: { text: string }) {
       setState('failed');
     }
   };
-  const label = { idle: 'コピー', done: 'コピーしました', failed: 'コピーできませんでした' }[state];
+  const label = {
+    idle: '問題と選択肢をコピー',
+    done: 'コピーしました',
+    failed: 'コピーできませんでした',
+  }[state];
   return (
     <button
       type="button"
       className={`copy-button ${state === 'done' ? 'is-done' : ''}`}
-      aria-label={state === 'idle' ? '問題と選択肢をコピー' : label}
       onClick={copy}
     >
       <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
@@ -149,7 +152,7 @@ function CopyButton({ text }: { text: string }) {
           </g>
         )}
       </svg>
-      <span aria-hidden="true">{label}</span>
+      <span>{label}</span>
     </button>
   );
 }

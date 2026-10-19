@@ -394,6 +394,7 @@ textarea {
 .chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 10px;
 }
@@ -410,6 +411,9 @@ textarea {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  /* 表示が「コピーしました」に変わっても幅を変えず、問題文が上下に動かないようにする */
+  min-width: 14em;
   gap: 4px;
   min-height: 32px;
   padding: 0 6px;
