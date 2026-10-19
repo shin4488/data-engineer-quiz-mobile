@@ -695,22 +695,15 @@ textarea {
   -webkit-overflow-scrolling: touch;
 }
 
-.diagram svg {
-  max-width: 100%;
+.diagram img {
+  max-width: none;
   height: auto;
+  vertical-align: top;
 }
 
 .diagram-figure .hint {
   text-align: center;
   margin: 4px 0 0;
-}
-
-.diagram-fallback {
-  font-size: 0.8rem;
-  background: var(--surface-2);
-  padding: 12px;
-  border-radius: 10px;
-  overflow-x: auto;
 }
 
 /* シート */

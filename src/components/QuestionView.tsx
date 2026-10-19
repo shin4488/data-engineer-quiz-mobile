@@ -93,7 +93,7 @@ export function Explanation({ question, stat }: { question: Question; stat?: Que
     <section className="explanation" aria-label="解説">
       <h3>解説</h3>
       <Markdown>{question.explanation}</Markdown>
-      {question.diagram && <Diagram code={question.diagram} />}
+      {question.diagram && <Diagram questionId={question.id} />}
       <h4>公式ドキュメント</h4>
       <ul className="refs">
         {question.references.map((r) => (

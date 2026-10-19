@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { usePrefersDark } from '../hooks.ts';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { findDiagram } from '../data/diagrams.ts';
 
 // 画面幅に合わせて縮小しすぎると文字が読めなくなるため、縮小はこの倍率までにして残りは横スクロールにする
 const MIN_SCALE = 0.8;
@@ -10,54 +10,34 @@ export function diagramWidth(naturalWidth: number, containerWidth: number): numb
   return Math.max(containerWidth, naturalWidth * MIN_SCALE);
 }
 
-/** Mermaid は大きいため、図を表示するときだけ読み込む。 */
-export function Diagram({ code }: { code: string }) {
+/** 解説の図。書き出し済みの SVG 画像を、端末の配色（ライト・ダーク）に合わせて表示する。 */
+export function Diagram({ questionId }: { questionId: string }) {
+  const image = findDiagram(questionId);
   const ref = useRef<HTMLDivElement>(null);
-  const dark = usePrefersDark();
-  const [failed, setFailed] = useState(false);
-  const [scrollable, setScrollable] = useState(false);
-  const id = `diagram-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { default: mermaid } = await import('mermaid');
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: dark ? 'dark' : 'neutral',
-          fontFamily: 'inherit',
-        });
-        const { svg } = await mermaid.render(id, code);
-        const box = ref.current;
-        if (cancelled || !box) return;
-        box.innerHTML = svg;
-        setFailed(false);
-        const el = box.querySelector('svg');
-        const natural = el?.viewBox.baseVal?.width ?? 0;
-        if (el && natural > 0 && box.clientWidth > 0) {
-          const width = diagramWidth(natural, box.clientWidth);
-          el.style.maxWidth = 'none';
-          el.style.width = `${Math.round(width)}px`;
-          setScrollable(width > box.clientWidth + 1);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [code, dark, id]);
+  useLayoutEffect(() => {
+    setContainerWidth(ref.current?.clientWidth ?? 0);
+  }, []);
 
-  if (failed) {
-    return <pre className="diagram-fallback">{code}</pre>;
-  }
+  if (!image) return null;
+  const width = containerWidth > 0 ? diagramWidth(image.width, containerWidth) : image.width;
   return (
     <figure className="diagram-figure">
-      <div className="diagram" ref={ref} role="img" aria-label="解説の図" />
-      {scrollable && <figcaption className="hint">図は横にスクロールできます</figcaption>}
+      <div className="diagram" ref={ref}>
+        <picture>
+          <source srcSet={image.dark} media="(prefers-color-scheme: dark)" />
+          <img
+            src={image.light}
+            alt="解説の図"
+            width={Math.round(width)}
+            height={Math.round((width * image.height) / image.width)}
+          />
+        </picture>
+      </div>
+      {containerWidth > 0 && width > containerWidth + 1 && (
+        <figcaption className="hint">図は横にスクロールできます</figcaption>
+      )}
     </figure>
   );
 }

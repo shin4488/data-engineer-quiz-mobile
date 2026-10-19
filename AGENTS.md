@@ -7,6 +7,7 @@ Google Cloud Professional Data Engineer 試験の練習問題アプリ（React +
 | 場所 | 内容 |
 | --- | --- |
 | `src/data/questions/*.yaml` | 問題データ。ファイル名が問題IDの接頭辞 |
+| `src/data/diagrams/` | 問題の図（Mermaid）を書き出した SVG 画像。`npm run render:diagrams` で作る |
 | `src/data/validate.ts` | 問題データの形式の定義と検証。テストと `scripts/validate-questions.ts` で共有する |
 | `src/data/categories.ts` | 試験ガイドの5分野とサービスのタグ |
 | `src/lib/` | 絞り込み・出題・採点・保存。画面に依存しない |
@@ -21,4 +22,4 @@ Google Cloud Professional Data Engineer 試験の練習問題アプリ（React +
 
 ## 検証
 
-変更に応じて `npm run lint`、`npm run typecheck`、`npm test`、`npm run build` を実行する。問題データを変えたら `npm run validate:questions` も実行する。CI（`.github/workflows/deploy.yml`）も同じ確認を行う。
+変更に応じて `npm run lint`、`npm run typecheck`、`npm test`、`npm run build` を実行する。問題データを変えたら `npm run validate:questions` も実行する。図を変えたら `npm run render:diagrams` で画像を書き出す。CI（`.github/workflows/deploy.yml`）も同じ確認を行う。
