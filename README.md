@@ -1,4 +1,4 @@
-# data-engineer-quiz-mobile
+# engineer-quiz-mobile
 
 Google Cloud Professional Data Engineer 試験の練習問題を、スマートフォンで解くための Web アプリ（PWA）です。iPhone のホーム画面に追加すると、アプリと同じように全画面で使えます。
 
@@ -19,7 +19,7 @@ Google Cloud Professional Data Engineer 試験の練習問題を、スマート�
 
 ## iPhone で使う
 
-1. Safari で公開 URL（`https://shin4488.github.io/data-engineer-quiz-mobile/`）を開く
+1. Safari で公開 URL（`https://shin4488.github.io/engineer-quiz-mobile/`）を開く
 2. 共有ボタンから「ホーム画面に追加」を選ぶ（iOS 26 以降で表示される「Webアプリとして開く」はオンのまま）
 3. 以降はホーム画面のアイコンから開く
 
