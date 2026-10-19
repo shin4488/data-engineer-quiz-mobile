@@ -27,6 +27,9 @@ function UpdateBanner() {
 // 保存データがブラウザに自動削除されにくくなるよう、起動時に依頼する
 void requestPersistence();
 
+// 以前の版が図の表示（Mermaid）のために使っていたキャッシュを消す
+globalThis.caches?.delete('assets').catch(() => {});
+
 const root = document.getElementById('root');
 if (root) {
   createRoot(root).render(

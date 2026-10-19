@@ -1,0 +1,302 @@
+{
+  "analyze-bi-004": {
+    "hash": "73c8ecc0c33d6bc1",
+    "width": 328,
+    "height": 640
+  },
+  "analyze-bi-010": {
+    "hash": "8b0510c131aabd4b",
+    "width": 177,
+    "height": 488
+  },
+  "analyze-bi-012": {
+    "hash": "354dbabefb82b9b4",
+    "width": 313,
+    "height": 528
+  },
+  "analyze-bi-014": {
+    "hash": "533ad500b9e0b772",
+    "width": 330,
+    "height": 638
+  },
+  "analyze-bi-017": {
+    "hash": "5665ee21721df128",
+    "width": 457,
+    "height": 773
+  },
+  "analyze-ml-001": {
+    "hash": "b3964afafe37be90",
+    "width": 415,
+    "height": 528
+  },
+  "analyze-ml-010": {
+    "hash": "cdbf4d9b1cbba156",
+    "width": 360,
+    "height": 592
+  },
+  "analyze-ml-011": {
+    "hash": "5139048b043f09e3",
+    "width": 568,
+    "height": 376
+  },
+  "analyze-ml-017": {
+    "hash": "7cd5105af84c8fc2",
+    "width": 471,
+    "height": 680
+  },
+  "design-reliability-004": {
+    "hash": "0b5ff0afb1ca2c25",
+    "width": 477,
+    "height": 442
+  },
+  "design-reliability-006": {
+    "hash": "82ed4a8dba1e5198",
+    "width": 308,
+    "height": 712
+  },
+  "design-reliability-011": {
+    "hash": "8f85917ad973d227",
+    "width": 305,
+    "height": 688
+  },
+  "design-reliability-015": {
+    "hash": "b77999e51ab98f34",
+    "width": 360,
+    "height": 694
+  },
+  "design-reliability-016": {
+    "hash": "ac7c42cdbb2ec91b",
+    "width": 343,
+    "height": 488
+  },
+  "design-reliability-021": {
+    "hash": "d016320bb38650dc",
+    "width": 349,
+    "height": 464
+  },
+  "design-reliability-023": {
+    "hash": "713302f5e59bfc28",
+    "width": 559,
+    "height": 868
+  },
+  "design-security-006": {
+    "hash": "133c65c8638d6201",
+    "width": 387,
+    "height": 774
+  },
+  "design-security-010": {
+    "hash": "d7ed5bc3a57f0a3d",
+    "width": 391,
+    "height": 592
+  },
+  "design-security-016": {
+    "hash": "7c57b23706aefe96",
+    "width": 436,
+    "height": 464
+  },
+  "design-security-019": {
+    "hash": "e846ae407ef08de0",
+    "width": 343,
+    "height": 416
+  },
+  "design-security-022": {
+    "hash": "3fdd845241614299",
+    "width": 436,
+    "height": 529
+  },
+  "design-security-025": {
+    "hash": "1f7ee61610d8b5ea",
+    "width": 470,
+    "height": 596
+  },
+  "ingest-dataflow-003": {
+    "hash": "bbebb68b36be96b3",
+    "width": 585,
+    "height": 668
+  },
+  "ingest-dataflow-005": {
+    "hash": "8cde72c408be9f7e",
+    "width": 369,
+    "height": 590
+  },
+  "ingest-dataflow-013": {
+    "hash": "22bbefe97a253600",
+    "width": 513,
+    "height": 638
+  },
+  "ingest-dataflow-018": {
+    "hash": "7a75a8be3c14fcba",
+    "width": 408,
+    "height": 664
+  },
+  "ingest-dataflow-023": {
+    "hash": "4101989d9e450eef",
+    "width": 383,
+    "height": 536
+  },
+  "ingest-dataflow-026": {
+    "hash": "015bfa301c82b58c",
+    "width": 216,
+    "height": 629
+  },
+  "ingest-dataflow-028": {
+    "hash": "1abc5fae61ba3c4c",
+    "width": 360,
+    "height": 424
+  },
+  "ingest-dataflow-029": {
+    "hash": "c5e7d09c331096c8",
+    "width": 430,
+    "height": 464
+  },
+  "ingest-services-005": {
+    "hash": "6f25676f9f50ad79",
+    "width": 387,
+    "height": 400
+  },
+  "ingest-services-008": {
+    "hash": "8a22d892ae88c56f",
+    "width": 344,
+    "height": 599
+  },
+  "ingest-services-010": {
+    "hash": "a91800fc6631bfad",
+    "width": 643,
+    "height": 461
+  },
+  "ingest-services-013": {
+    "hash": "74942d70099a6461",
+    "width": 426,
+    "height": 220
+  },
+  "ingest-services-018": {
+    "hash": "443230bb3952385e",
+    "width": 210,
+    "height": 592
+  },
+  "ingest-services-027": {
+    "hash": "113f25b4d8d80fab",
+    "width": 202,
+    "height": 568
+  },
+  "ingest-services-028": {
+    "hash": "9b1f5bc86a6e27ba",
+    "width": 373,
+    "height": 640
+  },
+  "maintain-cost-005": {
+    "hash": "a8099c6529cc759e",
+    "width": 365,
+    "height": 529
+  },
+  "maintain-cost-007": {
+    "hash": "e621bee49d45b748",
+    "width": 309,
+    "height": 616
+  },
+  "maintain-cost-012": {
+    "hash": "402093ff5c45531e",
+    "width": 327,
+    "height": 504
+  },
+  "maintain-cost-015": {
+    "hash": "56c0da076aa3f75e",
+    "width": 554,
+    "height": 312
+  },
+  "maintain-cost-019": {
+    "hash": "20409087f6675312",
+    "width": 413,
+    "height": 400
+  },
+  "maintain-ops-001": {
+    "hash": "88bfec0312ff5c2c",
+    "width": 558,
+    "height": 624
+  },
+  "maintain-ops-012": {
+    "hash": "b3595be7841b2547",
+    "width": 508,
+    "height": 813
+  },
+  "maintain-ops-015": {
+    "hash": "efc9e9fb283fdb05",
+    "width": 719,
+    "height": 611
+  },
+  "maintain-ops-016": {
+    "hash": "3bbc0e2255701088",
+    "width": 661,
+    "height": 328
+  },
+  "maintain-ops-021": {
+    "hash": "b088f5ee3f8181d4",
+    "width": 241,
+    "height": 480
+  },
+  "store-selection-001": {
+    "hash": "fdcc62c1fe65af5e",
+    "width": 385,
+    "height": 488
+  },
+  "store-selection-007": {
+    "hash": "c086c59aa340edbf",
+    "width": 392,
+    "height": 352
+  },
+  "store-selection-014": {
+    "hash": "2bcdc6eaab82ddd9",
+    "width": 658,
+    "height": 295
+  },
+  "store-selection-019": {
+    "hash": "70d4d2f87d4f6495",
+    "width": 168,
+    "height": 544
+  },
+  "store-selection-022": {
+    "hash": "bc5ee028997b31a3",
+    "width": 617,
+    "height": 788
+  },
+  "store-selection-024": {
+    "hash": "8d641d3c127a7113",
+    "width": 253,
+    "height": 440
+  },
+  "store-warehouse-011": {
+    "hash": "4c98377f70bae63f",
+    "width": 581,
+    "height": 488
+  },
+  "store-warehouse-012": {
+    "hash": "88f6edc4fc1f2511",
+    "width": 441,
+    "height": 616
+  },
+  "store-warehouse-015": {
+    "hash": "3b070a64ac1dd962",
+    "width": 481,
+    "height": 464
+  },
+  "store-warehouse-017": {
+    "hash": "33054749638f8fec",
+    "width": 589,
+    "height": 396
+  },
+  "store-warehouse-018": {
+    "hash": "d62ec257467b996e",
+    "width": 793,
+    "height": 436
+  },
+  "store-warehouse-021": {
+    "hash": "a8fa2497adad6c8d",
+    "width": 354,
+    "height": 720
+  },
+  "store-warehouse-022": {
+    "hash": "ce1d1756fec724d8",
+    "width": 296,
+    "height": 504
+  }
+}

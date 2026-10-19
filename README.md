@@ -37,6 +37,7 @@ npm test                    # テスト
 npm run lint                # Biome
 npm run typecheck           # 型チェック
 npm run validate:questions  # 問題データの形式チェック
+npm run render:diagrams     # 問題の図を SVG 画像に書き出す（Chromium が必要）
 npm run check:links         # 参考リンクが開けるか確認（ネットワークが必要）
 npm run build               # dist/ に出力
 ```
@@ -46,6 +47,8 @@ npm run build               # dist/ に出力
 問題は `src/data/questions/*.yaml` にあり、ファイル名が問題IDの接頭辞になります（例：`design-security-001`）。項目の定義と検証は `src/data/validate.ts`、分野とサービスの一覧は `src/data/categories.ts` を参照してください。
 
 問題IDは成績の保存に使うため、公開後に変更・再利用しないでください。問題を削除した場合、その問題の成績は表示されなくなります。
+
+図（`diagram` に Mermaid で書く）を追加・変更したら `npm run render:diagrams` を実行し、書き出した `src/data/diagrams/` もコミットしてください。アプリは書き出した SVG 画像を表示します。書き出しには Playwright の Chromium を使います（未導入なら `npx playwright install chromium`）。書き出し忘れはテストで検出します。
 
 ## 公開
 

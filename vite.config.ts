@@ -49,24 +49,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // 起動に必要なファイルだけを事前にキャッシュする。Mermaid は図の種類ごとに分割されて
-        // 合計が数 MB になるため、表示したときに取得したファイルだけをキャッシュする。
-        globPatterns: ['**/*.{html,css,svg,png}', 'assets/index-*.js'],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.includes('/assets/'),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'assets',
-              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 180 },
-            },
-          },
-        ],
+        // 図の画像を含め、すべてのファイルを事前にキャッシュし、オフラインでも使えるようにする
+        globPatterns: ['**/*.{html,js,css,svg,png}'],
       },
     }),
   ],
   build: {
-    // 問題データを含む本体と、図を表示するときだけ読み込む Mermaid のチャンクは大きくなるため、警告の上限を上げる
+    // 問題データを含む本体は大きくなるため、警告の上限を上げる
     chunkSizeWarningLimit: 2000,
   },
   test: {
