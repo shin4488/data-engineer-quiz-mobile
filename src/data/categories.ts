@@ -1,10 +1,11 @@
 // 試験ガイドの5分野。名称は Google Cloud の認定資格ページ（日本語）の表記に合わせる。
+// ただし、スマートフォンの画面で1行に収まるよう、空白や助詞を省くことがある。
 export const DOMAINS = [
   { id: 'design', label: 'データ処理システムの設計', short: '設計' },
   { id: 'ingest', label: 'データの取り込みと処理', short: '取り込み・処理' },
   { id: 'store', label: 'データの保存', short: '保存' },
   { id: 'analyze', label: '分析用データを準備して使用する', short: '分析' },
-  { id: 'maintain', label: 'データ ワークロードの維持と自動化', short: '維持・自動化' },
+  { id: 'maintain', label: 'データワークロード維持と自動化', short: '維持・自動化' },
 ] as const;
 
 export type DomainId = (typeof DOMAINS)[number]['id'];
