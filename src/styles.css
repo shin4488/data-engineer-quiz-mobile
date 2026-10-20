@@ -259,6 +259,9 @@ h4 {
   background: var(--surface);
   text-align: left;
   line-height: 1.4;
+  /* 長い名前は文節の区切りで折り返し、最後の行に1文字だけ残さない。未対応のブラウザでは通常の折り返しになる */
+  word-break: auto-phrase;
+  text-wrap: pretty;
   cursor: pointer;
 }
 
