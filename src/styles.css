@@ -678,11 +678,12 @@ textarea {
   padding: 6px 8px;
   text-align: left;
   vertical-align: top;
+  /* 英単語の途中で折り返さないよう、列の幅を単語より狭くしない */
+  overflow-wrap: break-word;
 }
 
 .markdown th {
   background: var(--surface-2);
-  white-space: nowrap;
 }
 
 .diagram-figure {

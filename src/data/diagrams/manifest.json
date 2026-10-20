@@ -14,6 +14,11 @@
     "width": 313,
     "height": 528
   },
+  "analyze-bi-013": {
+    "hash": "3ea70b0fd0c092fc",
+    "width": 354,
+    "height": 464
+  },
   "analyze-bi-014": {
     "hash": "533ad500b9e0b772",
     "width": 330,
@@ -39,10 +44,20 @@
     "width": 568,
     "height": 376
   },
+  "analyze-ml-016": {
+    "hash": "593a9711dcc58de5",
+    "width": 404,
+    "height": 616
+  },
   "analyze-ml-017": {
     "hash": "7cd5105af84c8fc2",
     "width": 471,
     "height": 680
+  },
+  "design-reliability-003": {
+    "hash": "b1211a0ab77ec313",
+    "width": 392,
+    "height": 615
   },
   "design-reliability-004": {
     "hash": "0b5ff0afb1ca2c25",
@@ -54,10 +69,20 @@
     "width": 308,
     "height": 712
   },
+  "design-reliability-008": {
+    "hash": "b9ab161e03cea2c0",
+    "width": 441,
+    "height": 373
+  },
   "design-reliability-011": {
     "hash": "8f85917ad973d227",
     "width": 305,
     "height": 688
+  },
+  "design-reliability-014": {
+    "hash": "3ed11a81cc66e3d1",
+    "width": 371,
+    "height": 328
   },
   "design-reliability-015": {
     "hash": "b77999e51ab98f34",
@@ -84,6 +109,11 @@
     "width": 387,
     "height": 774
   },
+  "design-security-007": {
+    "hash": "fbce440d09b9c047",
+    "width": 392,
+    "height": 528
+  },
   "design-security-010": {
     "hash": "d7ed5bc3a57f0a3d",
     "width": 391,
@@ -104,6 +134,11 @@
     "width": 436,
     "height": 529
   },
+  "design-security-023": {
+    "hash": "d753c74ac101c143",
+    "width": 378,
+    "height": 536
+  },
   "design-security-025": {
     "hash": "1f7ee61610d8b5ea",
     "width": 470,
@@ -119,6 +154,16 @@
     "width": 369,
     "height": 590
   },
+  "ingest-dataflow-007": {
+    "hash": "a0d451b6047df609",
+    "width": 456,
+    "height": 493
+  },
+  "ingest-dataflow-009": {
+    "hash": "61fbed352e2f827b",
+    "width": 332,
+    "height": 624
+  },
   "ingest-dataflow-013": {
     "hash": "22bbefe97a253600",
     "width": 513,
@@ -128,6 +173,11 @@
     "hash": "7a75a8be3c14fcba",
     "width": 408,
     "height": 664
+  },
+  "ingest-dataflow-022": {
+    "hash": "f0d1017fb8bddbe1",
+    "width": 360,
+    "height": 376
   },
   "ingest-dataflow-023": {
     "hash": "4101989d9e450eef",
@@ -149,10 +199,20 @@
     "width": 430,
     "height": 464
   },
+  "ingest-services-004": {
+    "hash": "110253ce83b8384f",
+    "width": 416,
+    "height": 600
+  },
   "ingest-services-005": {
     "hash": "6f25676f9f50ad79",
     "width": 387,
     "height": 400
+  },
+  "ingest-services-007": {
+    "hash": "33302264c0e7be20",
+    "width": 360,
+    "height": 464
   },
   "ingest-services-008": {
     "hash": "8a22d892ae88c56f",
@@ -184,6 +244,11 @@
     "width": 373,
     "height": 640
   },
+  "ingest-services-029": {
+    "hash": "ba18bd33fa226583",
+    "width": 386,
+    "height": 624
+  },
   "maintain-cost-005": {
     "hash": "a8099c6529cc759e",
     "width": 365,
@@ -193,6 +258,11 @@
     "hash": "e621bee49d45b748",
     "width": 309,
     "height": 616
+  },
+  "maintain-cost-011": {
+    "hash": "60f1d928c564e27b",
+    "width": 401,
+    "height": 440
   },
   "maintain-cost-012": {
     "hash": "402093ff5c45531e",
@@ -239,6 +309,16 @@
     "width": 385,
     "height": 488
   },
+  "store-selection-005": {
+    "hash": "270ce1eb17e2c080",
+    "width": 193,
+    "height": 576
+  },
+  "store-selection-006": {
+    "hash": "6af241876eed52d8",
+    "width": 413,
+    "height": 704
+  },
   "store-selection-007": {
     "hash": "c086c59aa340edbf",
     "width": 392,
@@ -248,6 +328,11 @@
     "hash": "2bcdc6eaab82ddd9",
     "width": 658,
     "height": 295
+  },
+  "store-selection-017": {
+    "hash": "4f8477e707eca786",
+    "width": 369,
+    "height": 400
   },
   "store-selection-019": {
     "hash": "70d4d2f87d4f6495",
@@ -274,10 +359,20 @@
     "width": 441,
     "height": 616
   },
+  "store-warehouse-013": {
+    "hash": "75145261a3ab17af",
+    "width": 388,
+    "height": 464
+  },
   "store-warehouse-015": {
     "hash": "3b070a64ac1dd962",
     "width": 481,
     "height": 464
+  },
+  "store-warehouse-016": {
+    "hash": "2d01f6b6affb9af5",
+    "width": 400,
+    "height": 376
   },
   "store-warehouse-017": {
     "hash": "33054749638f8fec",
