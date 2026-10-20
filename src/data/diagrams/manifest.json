@@ -54,6 +54,11 @@
     "width": 471,
     "height": 680
   },
+  "design-reliability-003": {
+    "hash": "b1211a0ab77ec313",
+    "width": 392,
+    "height": 615
+  },
   "design-reliability-004": {
     "hash": "0b5ff0afb1ca2c25",
     "width": 477,
@@ -64,10 +69,20 @@
     "width": 308,
     "height": 712
   },
+  "design-reliability-008": {
+    "hash": "b9ab161e03cea2c0",
+    "width": 441,
+    "height": 373
+  },
   "design-reliability-011": {
     "hash": "8f85917ad973d227",
     "width": 305,
     "height": 688
+  },
+  "design-reliability-014": {
+    "hash": "3ed11a81cc66e3d1",
+    "width": 371,
+    "height": 328
   },
   "design-reliability-015": {
     "hash": "b77999e51ab98f34",
