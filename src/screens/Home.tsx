@@ -262,7 +262,7 @@ function PracticeSetup({
               setCount(10);
             }}
           >
-            リセット
+            条件解除
           </button>
           <button
             type="button"
