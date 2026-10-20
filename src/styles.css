@@ -259,6 +259,9 @@ h4 {
   background: var(--surface);
   text-align: left;
   line-height: 1.4;
+  /* 長い名前は文節の区切りで折り返し、最後の行に1文字だけ残さない。未対応のブラウザでは通常の折り返しになる */
+  word-break: auto-phrase;
+  text-wrap: pretty;
   cursor: pointer;
 }
 
@@ -277,6 +280,8 @@ h4 {
 .chip-count {
   font-size: 0.75rem;
   color: var(--muted);
+  /* 名前が長い選択肢でも、問題数の数字を途中で折り返さない */
+  white-space: nowrap;
 }
 
 .service-filter {
