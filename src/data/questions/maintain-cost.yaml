@@ -375,6 +375,8 @@
     - DAG のコードで `datetime.now()` や `datetime.today()` を使わない
 
     この問題では、読み込み元を `gs://pos-data/{{ ds_nodash }}/`、読み込み先を `sales${{ ds_nodash }}` のように論理日付から組み立てます。再試行しても、数日後に再実行しても、同じ日のパーティションが同じ内容で置き換わるだけになります。
+
+    なお、毎日2時の実行で `{{ ds }}` が前日（データ区間の開始日）になるのは、Cloud Composer 3 の既定のバージョンである Airflow 2 の場合です。Airflow 3 では、cron で書いたスケジュールの既定が `CronTriggerTimetable` に変わり、論理日付が実行の予定時刻（当日）になります。Airflow 3 では、`schedule` に `CronDataIntervalTimetable` を指定するか、`{{ macros.ds_add(ds, -1) }}` のように論理日付から1日引いて処理対象日を求めます。
   references:
     - title: "Airflow DAG を作成する"
       url: "https://docs.cloud.google.com/composer/docs/composer-3/write-dags"
@@ -672,13 +674,16 @@
     **スケジュールされたクエリ** のポイント
     - BigQuery Data Transfer Service の仕組みで動く
     - `@run_time`（TIMESTAMP）と `@run_date`（DATE）のパラメータで、実行ごとの対象期間を指定できる。どちらも実際の開始時刻ではなく、スケジュール上の実行時刻を表す
-    - `@run_time` は UTC で表されるため、日本時間の日付で区切る場合は `DATE(@run_time, 'Asia/Tokyo')` のように変換する
+    - `@run_time` は UTC で表され、`@run_date` はその UTC の日付になる。日本時間の6時（UTC では前日の21時）の実行では `@run_date` が前日の日付になるため、日本時間の日付で区切る場合は `DATE(@run_time, 'Asia/Tokyo')` のように日本時間に変換してから計算する
     - 宛先テーブルへの追記・上書きを選べる
+
+    日本時間の前日（0時〜24時）の受講ログを集計する例です。`event_time` も日本時間の日付に変換して比べます。
 
     ```sql
     SELECT course_id, COUNT(*) AS views
     FROM learning.logs
-    WHERE DATE(event_time) = DATE_SUB(@run_date, INTERVAL 1 DAY)
+    WHERE DATE(event_time, 'Asia/Tokyo')
+      = DATE_SUB(DATE(@run_time, 'Asia/Tokyo'), INTERVAL 1 DAY)
     GROUP BY course_id
     ```
   references:
