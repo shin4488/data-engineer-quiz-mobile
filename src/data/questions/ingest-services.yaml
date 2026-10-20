@@ -112,10 +112,14 @@
     | 確認応答 | 成否が返るので、失敗した場合は再処理に備える |
     | 対象外の重複 | パブリッシャーが同じ内容を2回発行すると別のメッセージ ID になるため、重複は除かれない |
 
+    **pull 型でしか使えない理由**: 1回限りの配信では、確認応答のリクエストごとに成否が返り、成功したメッセージは再配信されません。pull 型はサブスクライバーが確認応答のリクエストを送るので、成否を受け取れます。push 型ではエンドポイントが返す HTTP のステータスコード（200 など）が確認応答になるため、成否を受け取る手段がありません。
+
     発行側の重複も避けたい場合は、取引 ID などをキーにして、サブスクライバー側でも重複を排除します。
   references:
     - title: "1 回限りの配信"
       url: "https://docs.cloud.google.com/pubsub/docs/exactly-once-delivery"
+    - title: "push サブスクリプション"
+      url: "https://docs.cloud.google.com/pubsub/docs/push"
 
 - id: ingest-services-004
   domain: ingest
