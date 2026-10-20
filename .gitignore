@@ -1,5 +1,5 @@
 # 依存関係・ビルド成果物
-node_modules/
+node_modules
 dist/
 dev-dist/
 coverage/
