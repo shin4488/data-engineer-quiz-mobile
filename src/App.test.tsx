@@ -130,6 +130,14 @@ describe('問題のコピー', () => {
     // 画面と同じ順番・記号（A〜D）で選択肢が並ぶ
     expect(text).toContain(shown.map((t) => `${t?.slice(0, 1)}. ${t?.slice(1)}`).join('\n'));
   });
+
+  it('コピー ボタンは選択肢の下に表示する', () => {
+    render(<App />);
+    click('練習を始める');
+    const lastChoice = screen.getAllByRole('button', { name: /^[A-D]選択肢 / }).at(-1);
+    const copy = screen.getByRole('button', { name: '問題と選択肢をコピー' });
+    expect(lastChoice?.compareDocumentPosition(copy)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
 });
 
 describe('模擬試験モード', () => {
