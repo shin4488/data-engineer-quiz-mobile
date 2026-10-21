@@ -41,7 +41,6 @@ export function QuestionView({ question, order, selected, onSelect, revealed }: 
             {serviceLabel(s)}
           </span>
         ))}
-        <CopyButton text={formatQuestionForCopy(question, order)} />
       </div>
       {question.type === 'multiple' && (
         <p className="multi-hint">複数選択：{question.answer.length}つ選んでください</p>
@@ -84,6 +83,7 @@ export function QuestionView({ question, order, selected, onSelect, revealed }: 
           );
         })}
       </ul>
+      <CopyButton text={formatQuestionForCopy(question, order)} />
     </article>
   );
 }

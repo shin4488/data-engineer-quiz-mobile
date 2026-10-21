@@ -413,12 +413,10 @@ textarea {
 }
 
 .copy-button {
-  margin-left: auto;
-  display: inline-flex;
+  /* 選択肢の下に右寄せで置く。ボタン自体に上下の余白があるため、選択肢との間を詰める */
+  margin: -8px 0 8px auto;
+  display: flex;
   align-items: center;
-  justify-content: flex-end;
-  /* 表示が「コピーしました」に変わっても幅を変えず、問題文が上下に動かないようにする */
-  min-width: 14em;
   gap: 4px;
   min-height: 32px;
   padding: 0 6px;
