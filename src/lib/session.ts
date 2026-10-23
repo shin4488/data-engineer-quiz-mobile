@@ -115,10 +115,6 @@ export function gradeExam(
   return { session: { ...session, results, finishedAt: now }, progress: next };
 }
 
-export function isFinished(session: QuizSession): boolean {
-  return session.finishedAt !== undefined;
-}
-
 export function summarize(session: QuizSession, questions: ReadonlyMap<string, Question>) {
   const byDomain = Object.fromEntries(
     DOMAINS.map((d) => [d.id, { total: 0, correct: 0 }]),
