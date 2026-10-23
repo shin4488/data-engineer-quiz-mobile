@@ -5,7 +5,7 @@ import { type Rng, shuffle } from './random.ts';
 
 export type Mode = 'practice' | 'exam';
 
-/** 本番に合わせた模擬試験の条件。合格ラインは公表されていないため目安。 */
+// 本番に合わせた模擬試験の条件。合格ラインは公表されていないため、PASS_RATE は目安。
 export const EXAM_QUESTION_COUNT = 50;
 export const EXAM_DURATION_MS = 120 * 60 * 1000;
 export const PASS_RATE = 0.7;

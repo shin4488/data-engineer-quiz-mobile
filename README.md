@@ -37,7 +37,7 @@ npm test                    # テスト
 npm run lint                # Biome
 npm run typecheck           # 型チェック
 npm run validate:questions  # 問題データの形式チェック
-npm run render:diagrams     # 問題の図を SVG 画像に書き出す（Chromium が必要）
+npm run render:diagrams     # 問題の図を SVG 画像に書き出す（Chromium とフォントが必要）
 npm run check:links         # 参考リンクが開けるか確認（ネットワークが必要）
 npm run build               # dist/ に出力
 ```
@@ -48,7 +48,7 @@ npm run build               # dist/ に出力
 
 問題IDは成績の保存に使うため、公開後に変更・再利用しないでください。問題を削除した場合、その問題の成績は表示されなくなります。
 
-図（`diagram` に Mermaid で書く）を追加・変更したら `npm run render:diagrams` を実行し、書き出した `src/data/diagrams/` もコミットしてください。アプリは書き出した SVG 画像を表示します。書き出しには Playwright の Chromium を使います（未導入なら `npx playwright install chromium`）。書き出し忘れはテストで検出します。
+図（`diagram` に Mermaid で書く）を追加・変更したら `npm run render:diagrams` を実行し、書き出した `src/data/diagrams/` もコミットしてください。アプリは書き出した SVG 画像を表示します。書き出しには Playwright の Chromium を使います（未導入なら `npx playwright install chromium`）。文字の幅を測るために Liberation Sans と Noto Sans CJK JP のフォントも使い、どちらかがないと書き出しを中止します。書き出し忘れはテストで検出します。
 
 ## 公開
 
