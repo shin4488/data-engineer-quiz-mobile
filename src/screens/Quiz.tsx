@@ -25,12 +25,10 @@ export function Quiz(props: Props) {
   const isExam = session.mode === 'exam';
   const total = session.questionIds.length;
   const marked = progress.marked.includes(id);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   // 問題が変わったら先頭から読めるようにする
   // biome-ignore lint/correctness/useExhaustiveDependencies: 問題の切り替えだけを契機にする
   useEffect(() => {
-    scrollRef.current?.scrollTo?.({ top: 0 });
     window.scrollTo?.({ top: 0 });
   }, [session.index]);
 
@@ -50,7 +48,7 @@ export function Quiz(props: Props) {
   }
 
   return (
-    <div className="screen quiz" ref={scrollRef}>
+    <div className="screen quiz">
       <header className="quiz-header">
         <button
           type="button"
