@@ -78,6 +78,7 @@ export function Quiz(props: Props) {
       {isExam ? (
         <ExamBody {...props} questionId={id} />
       ) : (
+        // 回答する前の選択は PracticeBody の中だけで持つため、前の問題の選択が残らないよう、問題が変わったら作り直す
         <PracticeBody key={id} {...props} questionId={id} marked={marked} />
       )}
 
