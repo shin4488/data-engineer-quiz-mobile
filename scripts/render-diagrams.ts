@@ -1,10 +1,12 @@
 /// <reference lib="dom" />
 // 使い方: npm run render:diagrams [-- --all]
-// 問題の図（Mermaid）を、ライト用とダーク用の SVG 画像に書き出す。図を追加・変更したら実行し、
-// 書き出したファイルもコミットする。--all を付けると、変更のない図も書き出し直す。
+// 問題の図（Mermaid）を、ライト用とダーク用の SVG 画像に書き出す。
+// 図を追加・変更したら実行し、書き出したファイルもコミットする。
+// --all を付けると、変更のない図も書き出し直す。
 //
-// 端末では Mermaid を動かさず、この画像を表示する。Mermaid は分割された大きなファイルを
-// 表示のたびに取得するため、更新直後の古い版やオフラインでは図を表示できなかった。
+// 端末では Mermaid を動かさず、この画像を表示する。
+// Mermaid は図を表示するたびに分割された大きなファイルを取得し、そのファイル名はアプリの新しい版を公開するたびに変わる。
+// そのため端末で動かすと、新しい版の公開後に更新前の版で図を開いたときや、オフラインでファイルをまだ取得していないときに、図を表示できない。
 //
 // Playwright の Chromium を使う（未導入なら `npx playwright install chromium`）。
 // 別の Chromium を使うときは、環境変数 CHROMIUM_PATH に実行ファイルのパスを指定する。
@@ -24,8 +26,8 @@ const questionDir = join(root, 'src/data/questions');
 const outDir = join(root, 'src/data/diagrams');
 const manifestPath = join(outDir, 'manifest.json');
 
-// 表示する端末のフォント（iPhone なら SF と ヒラギノ）を先に並べる。書き出す環境には端末のフォントが
-// ないため、文字の幅は Liberation Sans（英数字）と Noto Sans CJK JP（日本語）で測る。
+// 表示する端末のフォント（iPhone なら SF と ヒラギノ）を先に並べる。
+// 書き出す環境には端末のフォントがないため、文字の幅は Liberation Sans（英数字）と Noto Sans CJK JP（日本語）で測る。
 const MEASURE_FONTS = [
   { family: 'Liberation Sans', sample: 'BigQuery' },
   { family: 'Noto Sans CJK JP', sample: 'データ' },

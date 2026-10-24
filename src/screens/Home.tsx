@@ -206,6 +206,7 @@ function PracticeSetup({
             onChange={(e) => set({ markedOnly: e.target.checked })}
           />
         </label>
+        {/* 未回答の問題は間違えた回数が0回のため、2つの条件を同時に指定すると1問も当てはまらない。一方を変えたら、もう一方を解除する */}
         <label className="switch-row">
           <span>間違えた回数</span>
           <select

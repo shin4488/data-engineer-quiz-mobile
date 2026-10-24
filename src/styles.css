@@ -681,7 +681,7 @@ textarea {
   padding: 6px 8px;
   text-align: left;
   vertical-align: top;
-  /* 英単語の途中で折り返さないよう、列の幅を単語より狭くしない */
+  /* body の anywhere のままだと列の幅が単語より狭くなり、英単語の途中で折り返されるため、break-word にする */
   overflow-wrap: break-word;
 }
 

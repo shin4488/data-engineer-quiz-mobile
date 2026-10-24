@@ -10,12 +10,11 @@ export function useAppData() {
   return { data, setData, saveFailed };
 }
 
-export function useNow(intervalMs: number, enabled = true): number {
+export function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!enabled) return;
     const timer = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(timer);
-  }, [intervalMs, enabled]);
+  }, [intervalMs]);
   return now;
 }

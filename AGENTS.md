@@ -8,9 +8,9 @@ Google Cloud Professional Data Engineer 試験の練習問題アプリ（React +
 | --- | --- |
 | `src/data/questions/*.yaml` | 問題データ。ファイル名が問題IDの接頭辞 |
 | `src/data/diagrams/` | 問題の図（Mermaid）を書き出した SVG 画像。`npm run render:diagrams` で作る |
-| `src/data/validate.ts` | 問題データの形式の定義と検証。テストと `scripts/validate-questions.ts` で共有する |
+| `src/data/validate.ts` | 問題データの形式の定義と検証。アプリでの読み込み、テスト、`scripts/validate-questions.ts`・`scripts/render-diagrams.ts` で共有する |
 | `src/data/categories.ts` | 試験ガイドの5分野とサービスのタグ |
-| `src/lib/` | 絞り込み・出題・採点・保存。画面に依存しない |
+| `src/lib/` | 絞り込み・出題・採点・保存・コピーする文章の作成。画面に依存しない |
 | `src/screens/`, `src/components/` | 画面 |
 
 ## 守ること

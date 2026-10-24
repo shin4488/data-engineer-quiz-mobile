@@ -5,7 +5,7 @@ import { type Rng, shuffle } from './random.ts';
 
 export type Mode = 'practice' | 'exam';
 
-/** 本番に合わせた模擬試験の条件。合格ラインは公表されていないため目安。 */
+// 本番に合わせた模擬試験の条件。合格ラインは公表されていないため、PASS_RATE は目安。
 export const EXAM_QUESTION_COUNT = 50;
 export const EXAM_DURATION_MS = 120 * 60 * 1000;
 export const PASS_RATE = 0.7;
@@ -93,8 +93,8 @@ export function selectExamAnswer(
 }
 
 /**
- * 模擬試験をまとめて採点する。未回答は不正解として採点するが、
- * 解いていない問題を「間違えた回数」に数えないよう、成績には回答した問題だけを記録する。
+ * 模擬試験をまとめて採点する。
+ * 未回答は不正解として採点するが、解いていない問題を「間違えた回数」に数えないよう、成績には回答した問題だけを記録する。
  */
 export function gradeExam(
   session: QuizSession,
@@ -113,10 +113,6 @@ export function gradeExam(
     if (selected.length > 0) next = recordAnswer(next, id, correct, now);
   }
   return { session: { ...session, results, finishedAt: now }, progress: next };
-}
-
-export function isFinished(session: QuizSession): boolean {
-  return session.finishedAt !== undefined;
 }
 
 export function summarize(session: QuizSession, questions: ReadonlyMap<string, Question>) {

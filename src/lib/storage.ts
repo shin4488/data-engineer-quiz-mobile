@@ -158,7 +158,7 @@ export function importData(text: string): ImportResult {
   return { ok: true, data };
 }
 
-/** ブラウザに保存データを自動削除しないよう依頼する。結果は対応状況により変わる。 */
+/** ブラウザに保存データを自動削除しないよう依頼する。認められたら true、断られたら false、対応していないブラウザや失敗したときは null を返す。 */
 export async function requestPersistence(): Promise<boolean | null> {
   try {
     if (!navigator.storage?.persist) return null;
